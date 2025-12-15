@@ -1,6 +1,6 @@
 # main.py
 import json
-from coupang_crawler import get_coupang_product_json_pagination
+from get_coupang_reviews import get_coupang_reviews
 
 
 def main():
@@ -14,15 +14,13 @@ def main():
 
     # 크롤링 실행 (모듈에서 함수 호출)
     print(">>> 크롤러 실행을 시작합니다...")
-    final_data = get_coupang_product_json_pagination(
-        target_url, target_review_count=TARGET_COUNT
-    )
+    final_data = get_coupang_reviews(target_url, target_review_count=TARGET_COUNT)
 
     if final_data["product_info"]:
         print(f"\n수집 성공! (총 리뷰: {final_data['reviews']['count']}개)")
 
         # 파일 저장
-        file_name = "coupang_result_final.json"
+        file_name = "coupang_result.json"
         with open(file_name, "w", encoding="utf-8") as f:
             json.dump(final_data, f, indent=2, ensure_ascii=False)
 

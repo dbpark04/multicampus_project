@@ -8,7 +8,7 @@ import time
 import random
 
 
-def get_coupang_product_json_pagination(url, target_review_count=100):
+def get_coupang_reviews(url, target_review_count=100):
     """
     쿠팡 상품 URL을 받아 상품 정보와 리뷰를 수집하는 함수
     Args:
@@ -24,9 +24,8 @@ def get_coupang_product_json_pagination(url, target_review_count=100):
     options.add_argument("--no-service-autorun")
     options.add_argument("--password-store=basic")
 
-    # 창 크기 고정 (최대화 X)
     options.add_argument("--window-size=1280,1024")
-
+    options.add_argument("--blink-settings=imagesEnabled=false")
     driver = uc.Chrome(options=options, use_subprocess=False)
 
     result_data = {"product_info": {}, "reviews": {}}
@@ -219,7 +218,7 @@ def get_coupang_product_json_pagination(url, target_review_count=100):
                         next_arrow_btn,
                     )
                     driver.execute_script("arguments[0].click();", next_arrow_btn)
-                    time.sleep(random.uniform(4, 6))
+                    time.sleep(random.uniform(2, 3.5))
                     current_page_num += 1
                     continue
                 except:
@@ -238,7 +237,7 @@ def get_coupang_product_json_pagination(url, target_review_count=100):
                 )
                 time.sleep(0.5)
                 driver.execute_script("arguments[0].click();", next_num_btn)
-                time.sleep(random.uniform(2, 4))
+                time.sleep(random.uniform(1, 1.7))
                 current_page_num += 1
             except:
                 print("다음 페이지 버튼을 찾을 수 없습니다.")
