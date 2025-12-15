@@ -1,0 +1,31 @@
+{
+  "search_name": "(string)",
+  "category": "(string)",
+  "data": [
+    {
+      "product_info": {
+        "product_id": "(string)",
+        "category_path": "(string)",
+        "product_name": "(string)",
+        "price": "(string)",
+        "delivery_type": "(string)",
+        "total_reviews": "(string)",
+        "product_url": "(string)"
+      },
+      "reviews": {
+        "count": "(int)",
+        "data": [
+          {
+            "id": "(int)",
+            "date": "(string)",
+            "rating": "(int)",
+            "has_image": "(boolean)",
+            "title": "(string)",
+            "content": "(string)",
+            "full_text": "(string)"
+          }
+        ]
+      }
+    }
+  ]
+}
