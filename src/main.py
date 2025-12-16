@@ -7,8 +7,8 @@ from selenium.common.exceptions import (
     NoSuchWindowException,
     WebDriverException,
 )
+import gc
 
-# 모듈 이름은 사용자의 환경에 맞게 유지
 from get_product_urls import get_product_urls
 from get_product_reviews import get_product_reviews
 
@@ -16,8 +16,8 @@ from get_product_reviews import get_product_reviews
 def main():
     start_time = time.time()
     KEYWORDS = ["사과"]
-    PRODUCT_LIMIT = 10  # 키워드 당 수집할 상품 수
-    REVIEW_TARGET = 10000  # 목표 리뷰 수
+    PRODUCT_LIMIT = 3
+    REVIEW_TARGET = 10
 
     print(">>> 전체 작업을 시작합니다...")
 
@@ -35,7 +35,6 @@ def main():
             print(f">>> [{k_idx+1}/{len(KEYWORDS)}] '{keyword}' URL 수집 시작")
             print(f"{'='*50}")
 
-            # URL 수집용 옵션 생성
             options = uc.ChromeOptions()
             options.add_argument("--no-first-run")
             options.add_argument("--no-service-autorun")
@@ -47,90 +46,107 @@ def main():
             try:
                 urls = get_product_urls(driver, keyword, max_products=PRODUCT_LIMIT)
                 print(f">>> [{keyword}] URL {len(urls)}개 확보 완료")
+                time.sleep(2)
             except Exception as e:
                 print(f">>> URL 수집 중 에러: {e}")
                 urls = []
             finally:
+                print(">>> URL 수집 브라우저 종료 및 메모리 정리 중...")
                 try:
                     driver.quit()
+                    try:
+                        del driver
+                    except:
+                        pass
+                    gc.collect()
+                    time.sleep(random.uniform(15, 16))  # URL 수집 후 충분한 대기
                 except:
                     pass
-                time.sleep(5)  # 브라우저 종료 후 잠시 대기
 
             if not urls:
                 print(f">>> [{keyword}] 수집된 URL이 없어 넘어갑니다.")
                 continue
 
             # ---------------------------------------------------------
-            # [단계 2] 개별 상품 리뷰 수집
+            # [단계 2] 개별 상품 리뷰 수집 (메인에서 재시도 로직 구현)
             # ---------------------------------------------------------
-            print(f">>> [{keyword}] 상세 리뷰 수집 시작 (상품마다 브라우저 재실행)")
+            print(f">>> [{keyword}] 상세 리뷰 수집 시작 (실패 시 브라우저 재실행)")
 
             for idx, url in enumerate(urls):
-                print(f"\n   [{idx+1}/{len(urls)}] 상품 접속 준비 중... ({keyword})")
+                print(f"\n   [{idx+1}/{len(urls)}] 상품 처리 시작... ({keyword})")
 
-                options = uc.ChromeOptions()
-                options.add_argument("--no-first-run")
-                options.add_argument("--no-service-autorun")
-                options.add_argument("--password-store=basic")
-                options.add_argument("--window-size=1920,1080")
-                options.add_argument("--blink-settings=imagesEnabled=false")
+                MAX_RETRIES = 2
+                success = False
 
-                try:
-                    driver = uc.Chrome(options=options, use_subprocess=False)
-                    time.sleep(1)
-
-                except WebDriverException as e:
-                    print(f"     -> [치명적 에러] 드라이버 실행 실패: {e}")
-                    time.sleep(10)
-                    continue
-
-                try:
-                    # 데이터 수집 함수 호출
-                    data = get_product_reviews(
-                        driver, url, idx + 1, target_review_count=REVIEW_TARGET
-                    )
-
-                    if data and data.get("product_info"):
-                        # 카테고리 정보 업데이트
-                        current_category = data["product_info"].get("category_path")
-                        if not top_category and current_category:
-                            top_category = current_category
-
-                        r_data = data.get("reviews", {})
-                        keyword_total_collected += r_data.get("total_count", 0)
-                        keyword_total_text += r_data.get("text_count", 0)
-
-                        crawled_data_list.append(data)
-                        print(
-                            f"     -> [완료] 전체: {r_data.get('total_count')}개 / 글있음: {r_data.get('text_count')}개"
-                        )
-                    else:
-                        print(
-                            "     -> [실패] 데이터 없음 (함수 반환값 None 또는 비어있음)"
-                        )
-
-                except UnexpectedAlertPresentException:
+                for attempt in range(MAX_RETRIES):
                     print(
-                        "     -> [차단/경고] 페이지 접속 중 알림창(Alert)이 발생했습니다. (서버 오류 등)"
+                        f"     -> [시도 {attempt+1}/{MAX_RETRIES}] 브라우저 실행 중..."
                     )
-                except NoSuchWindowException:
-                    print(
-                        "     -> [브라우저 에러] 브라우저 창이 강제로 종료되었습니다."
-                    )
-                except Exception as e:
-                    print(f"     -> [일반 에러] {e}")
 
-                finally:
-                    # 안전하게 종료
+                    driver = None
                     try:
-                        driver.quit()
-                    except:
-                        pass
-                    print("     -> 브라우저 세션 종료")
+                        # 1. 매 시도마다 옵션과 드라이버를 새로 생성
+                        options = uc.ChromeOptions()
+                        options.add_argument("--no-first-run")
+                        options.add_argument("--no-service-autorun")
+                        options.add_argument("--password-store=basic")
+                        options.add_argument("--window-size=1920,1080")
+                        options.add_argument("--blink-settings=imagesEnabled=false")
 
-                # 대기 시간 증가 (안정성 확보를 위해 10~15초 권장)
-                sleep_time = random.uniform(10, 15)
+                        driver = uc.Chrome(options=options, use_subprocess=False)
+
+                        # 2. 수집 함수 호출 (에러나면 바로 except로 튀어서 드라이버 재시작)
+                        data = get_product_reviews(
+                            driver, url, idx + 1, target_review_count=REVIEW_TARGET
+                        )
+
+                        if data and data.get("product_info"):
+                            # 성공 데이터 처리
+                            current_category = data["product_info"].get("category_path")
+                            if not top_category and current_category:
+                                top_category = current_category
+
+                            r_data = data.get("reviews", {})
+                            keyword_total_collected += r_data.get("total_count", 0)
+                            keyword_total_text += r_data.get("text_count", 0)
+
+                            crawled_data_list.append(data)
+                            print(
+                                f"     -> [성공] 수집 완료 (글 포함: {r_data.get('text_count')}개)"
+                            )
+                            success = True
+
+                            # 성공했으니 브라우저 닫고 반복문 탈출
+                            driver.quit()
+                            break
+                        else:
+                            print("     -> [실패] 데이터가 비어있습니다. 재시도합니다.")
+                            driver.quit()
+                            # continue로 다음 attempt 진행
+
+                    except Exception as e:
+                        print(f"     -> [에러 발생] {e}")
+                        # 에러 발생 시 확실하게 닫기
+                        if driver:
+                            try:
+                                driver.quit()
+                            except:
+                                pass
+
+                        # 잠시 대기 후 재시도
+                        print("     -> 20초 후 재시도합니다...")
+                        time.sleep(20)
+                        continue  # 다음 attempt로
+
+                # 2번 다 실패했을 경우
+                if not success:
+                    print(
+                        f"     -> [최종 실패] {MAX_RETRIES}번 시도했으나 수집 실패. 다음 상품으로 넘어갑니다."
+                    )
+
+                # 다음 상품 넘어가기 전 대기
+                gc.collect()
+                sleep_time = random.uniform(15, 16)  # URL 수집 후 충분한 대기
                 print(f"     -> 다음 상품 대기 중... ({sleep_time:.1f}초)")
                 time.sleep(sleep_time)
 
