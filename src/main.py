@@ -15,8 +15,8 @@ from get_product_reviews import get_product_reviews
 
 def main():
     start_time = time.time()
-    KEYWORDS = ["립스틱"]
-    PRODUCT_LIMIT = 1
+    KEYWORDS = ["마스카라", "아이섀도우"]
+    PRODUCT_LIMIT = 3
     REVIEW_TARGET = 200
 
     print(">>> 전체 작업을 시작합니다...")
@@ -54,17 +54,7 @@ def main():
                 urls = []
             finally:
                 print(">>> URL 수집 브라우저 종료 및 메모리 정리 중...")
-                try:
-                    driver.quit()
-                    print("driver 종료")
-                    try:
-                        del driver
-                    except:
-                        pass
-                    gc.collect()
-                    time.sleep(20)  # URL 수집 후 충분한 대기
-                except:
-                    pass
+                driver = driver_cleanup(driver)
 
             if not urls:
                 print(f">>> [{keyword}] 수집된 URL이 없어 넘어갑니다.")
@@ -127,12 +117,7 @@ def main():
                                 print(
                                     f"     -> 총 수집 리뷰 {keyword_total_collected}개 ≥ 1000 → 드라이버 재시작"
                                 )
-                                try:
-                                    driver.quit()
-                                    print("driver 종료")
-                                except:
-                                    pass
-                                driver = None
+                                driver = driver_cleanup(driver)
                             else:
                                 print(
                                     f"     -> 총 수집 리뷰 {keyword_total_collected}개 < 1000 → 드라이버 유지"
@@ -143,27 +128,14 @@ def main():
                         else:
                             print("     -> [실패] 데이터가 비어있습니다. 재시도합니다.")
                             # 드라이버 재시작
-                            try:
-                                driver.quit()
-                                print("driver 종료")
-                            except:
-                                pass
-                            driver = None
+                            driver = driver_cleanup(driver)
 
                     except Exception as e:
                         print(f"     -> [에러 발생] {e}")
                         # 에러 발생 시 드라이버 재시작
                         if driver:
-                            try:
-                                driver.quit()
-                                print("driver 종료")
-                            except:
-                                pass
-                        driver = None
+                            driver = driver_cleanup(driver)
 
-                        # 잠시 대기 후 재시도
-                        print("     -> 20초 후 재시도합니다...")
-                        time.sleep(20)
                         continue
 
                 # 2번 다 실패했을 경우
@@ -172,20 +144,13 @@ def main():
                         f"     -> [최종 실패] {MAX_RETRIES}번 시도했으나 수집 실패. 다음 상품으로 넘어갑니다."
                     )
 
-                # 다음 상품 넘어가기 전 대기
-                gc.collect()
-                print(f"     -> 다음 상품 대기 중... (20.0초)")
-                time.sleep(20)
+                print(f"     -> 다음 상품 대기중...(2초)")
+                time.sleep(2)
 
             # 키워드 처리 완료 후 드라이버가 남아있으면 종료
             if driver:
                 print(f">>> [{keyword}] 모든 상품 처리 완료 - 드라이버 종료")
-                try:
-                    driver.quit()
-                    print("driver 종료")
-                except:
-                    pass
-                driver = None
+                driver = driver_cleanup(driver)
 
             # ---------------------------------------------------------
             # [단계 3] 키워드 완료 후 저장
@@ -205,8 +170,10 @@ def main():
             else:
                 print(f"\n[{keyword}] 수집된 데이터가 없습니다.")
 
-            print(f">>> 다음 키워드 준비 중 (20.0초)...")
-            time.sleep(20)
+            # 다음 키워드 준비 중 (마지막 키워드가 아닐 때만)
+            if k_idx < len(KEYWORDS) - 1:  # 마지막 키워드가 아닐 때만
+                print(f">>> 다음 키워드 준비 중 (20.0초)...")
+                time.sleep(20)
 
     except KeyboardInterrupt:
         print("\n>>> 사용자에 의해 작업이 중단되었습니다.")
@@ -218,6 +185,23 @@ def main():
         minutes = int((elapsed_time % 3600) // 60)
         seconds = int(elapsed_time % 60)
         print(f"\n총 실행 시간: {hours}시간 {minutes}분 {seconds}초")
+
+
+def driver_cleanup(driver):
+    try:
+        driver.quit()
+        print("driver 종료 및 20초 대기")
+        try:
+            del driver
+        except Exception as e:
+            print(f"드라이버 삭제 중 에러(무시됨): {e}")
+        gc.collect()
+        driver = None
+        time.sleep(20)
+    except Exception as e:
+        print(f"드라이버 종료 중 에러(무시됨): {e}")
+
+    return None
 
 
 if __name__ == "__main__":
