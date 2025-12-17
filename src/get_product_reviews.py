@@ -124,8 +124,33 @@ def get_product_reviews(driver, url, rank_num, target_review_count=100):
     except:
         pass
 
+    # 브랜드 이름 추출
+    brand_name = ""
+    try:
+        # 첫 번째 시도: twc-font-bold twc-text-[14px] ... 클래스
+        brand_div = soup.select_one(
+            "div.twc-font-bold.twc-text-\\[14px\\].twc-text-\\[\\#111\\].twc-leading-\\[17px\\].twc-max-w-\\[130px\\].md\\:twc-max-w-\\[328px\\].twc-overflow-hidden.twc-text-ellipsis.twc-whitespace-nowrap"
+        )
+        if brand_div:
+            brand_name = clean_text(brand_div.text.strip())
+        else:
+            # 두 번째 시도: twc-mb-[12px] ... 클래스
+            brand_div_alt = soup.select_one(
+                "div.twc-mb-\\[12px\\].twc-text-\\[14px\\].twc-leading-\\[17px\\].twc-text-\\[\\#346AFF\\]"
+            )
+            if brand_div_alt:
+                brand_name = clean_text(brand_div_alt.text.strip())
+            else:
+                # 세 번째 시도: twc-text-sm twc-text-blue-600 클래스
+                brand_div_third = soup.select_one("div.twc-text-sm.twc-text-blue-600")
+                if brand_div_third:
+                    brand_name = clean_text(brand_div_third.text.strip())
+    except:
+        pass
+
     result_data["product_info"] = {
         "product_id": product_id,
+        "brand": brand_name,
         "category_path": category_str,
         "product_name": product_name,
         "price": price,
@@ -134,7 +159,7 @@ def get_product_reviews(driver, url, rank_num, target_review_count=100):
         "product_url": url,
     }
 
-    print(f"   -> 상품ID: {product_id} / 상품명: {product_name}")
+    print(f"   -> 상품ID: {product_id} / 브랜드: {brand_name} / 상품명: {product_name}")
     print(f"   -> 가격: {price}원 / 배송: {delivery_type} / 총리뷰: {total_reviews}")
 
     # -------------------------------------------------------

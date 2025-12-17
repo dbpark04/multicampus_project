@@ -6,6 +6,7 @@
     {
       "product_info": {
         "product_id": "string", 
+        "brand": "string",
         "category_path": "string",
         "product_name": "string",
         "price": "string",
