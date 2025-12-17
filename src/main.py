@@ -16,8 +16,8 @@ from get_product_reviews import get_product_reviews
 def main():
     start_time = time.time()
     KEYWORDS = ["마스카라", "아이섀도우"]
-    PRODUCT_LIMIT = 3
-    REVIEW_TARGET = 200
+    PRODUCT_LIMIT = 2
+    REVIEW_TARGET = 10
 
     print(">>> 전체 작업을 시작합니다...")
 
@@ -67,6 +67,7 @@ def main():
 
             # 첫 상품을 위한 드라이버 생성
             driver = None
+            driver_collected_count = 0  # 이번 드라이버 생애주기에서 수집한 리뷰 개수
 
             for idx, url in enumerate(urls):
                 print(f"\n   [{idx+1}/{len(urls)}] 상품 처리 시작... ({keyword})")
@@ -89,6 +90,7 @@ def main():
                             options.add_argument("--window-size=1920,1080")
                             options.add_argument("--blink-settings=imagesEnabled=false")
                             driver = uc.Chrome(options=options, use_subprocess=False)
+                            driver_collected_count = 0
 
                         # 수집 함수 호출
                         data = get_product_reviews(
@@ -97,30 +99,36 @@ def main():
 
                         if data and data.get("product_info"):
                             r_data = data.get("reviews", {})
-                            keyword_total_collected += r_data.get("total_count", 0)
+                            current_collected = r_data.get("total_count", 0)
+
+                            keyword_total_collected += current_collected
                             keyword_total_text += r_data.get("text_count", 0)
+                            driver_collected_count += (
+                                current_collected  # 드라이버 생애주기 카운트 증가
+                            )
 
                             crawled_data_list.append(data)
                             print(
-                                f"     -> [성공] 수집 완료 (전체: {r_data.get('total_count', 0)}개)"
+                                f"     -> [성공] 수집 완료 (전체: {current_collected}개)"
                             )
                             print(
                                 f"     -> [성공] 수집 완료 (글 포함: {r_data.get('text_count', 0)}개)"
                             )
                             # 실제 수집한 리뷰 개수 확인
                             print(
-                                f"     -> 수집한 리뷰 개수: {keyword_total_collected}개"
+                                f"     -> 키워드 누적: {keyword_total_collected}개 / 드라이버 생애주기: {driver_collected_count}개"
                             )
 
-                            # 4500개 이상이면 드라이버 재시작, 아니면 유지
-                            if keyword_total_collected >= 1000:
+                            # 드라이버 생애주기에서 1000개 초과면 재시작, 아니면 유지
+                            if driver_collected_count > 1000:
                                 print(
-                                    f"     -> 총 수집 리뷰 {keyword_total_collected}개 ≥ 1000 → 드라이버 재시작"
+                                    f"     -> 드라이버 수집 {driver_collected_count}개 > 1000 → 드라이버 재시작"
                                 )
                                 driver = driver_cleanup(driver)
+                                driver_collected_count = 0  # 카운트 초기화
                             else:
                                 print(
-                                    f"     -> 총 수집 리뷰 {keyword_total_collected}개 < 1000 → 드라이버 유지"
+                                    f"     -> 드라이버 수집 {driver_collected_count}개 ≤ 1000 → 드라이버 유지"
                                 )
 
                             success = True
@@ -129,12 +137,14 @@ def main():
                             print("     -> [실패] 데이터가 비어있습니다. 재시도합니다.")
                             # 드라이버 재시작
                             driver = driver_cleanup(driver)
+                            driver_collected_count = 0  # 카운트 초기화
 
                     except Exception as e:
                         print(f"     -> [에러 발생] {e}")
                         # 에러 발생 시 드라이버 재시작
                         if driver:
                             driver = driver_cleanup(driver)
+                            driver_collected_count = 0  # 카운트 초기화
 
                         continue
 

@@ -9,13 +9,19 @@ import random
 
 
 def clean_text(text):
-    """비정상적인 줄 종결자 및 특수 문자 제거"""
+    """비정상적인 줄 종결자, 특수 공백 및 특수 문자 제거"""
     if not text:
         return text
+
+    # NBSP(\u00A0)를 가장 먼저 일반 공백으로 치환해야 합니다.
+    text = text.replace("\u00a0", " ")
+
     # LS(U+2028), PS(U+2029) 등 특수 줄바꿈 문자를 일반 공백으로 치환
     text = text.replace("\u2028", " ").replace("\u2029", " ")
-    # 기타 제어 문자 제거 (탭, 줄바꿈은 유지)
+
+    # 기타 제어 문자 제거 (이제 일반 공백이 된 NBSP는 isprintable()을 통과함)
     text = "".join(char for char in text if char.isprintable() or char in "\n\r\t")
+
     return text.strip()
 
 
@@ -171,6 +177,17 @@ def get_product_reviews(driver, url, rank_num, target_review_count=100):
             f"\n   >>> [별점 변경] '{target_text}' 리뷰 수집 시작 (목표: {target_review_count}개)"
         )
 
+        # 리뷰 섹션 상단으로 스크롤 (드롭다운 버튼이 보이도록)
+        try:
+            review_section = driver.find_element(By.ID, "sdpReview")
+            driver.execute_script("arguments[0].scrollIntoView(true);", review_section)
+            driver.execute_script("window.scrollBy(0, -200);")  # 헤더 공간 확보
+            time.sleep(1)
+        except:
+            # 리뷰 섹션을 못 찾으면 페이지 상단으로
+            driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(1)
+
         # 1. 별점 드롭다운 열기 (Test Script의 XPath 사용)
         try:
             dropdown_trigger = WebDriverWait(driver, 5).until(
@@ -181,6 +198,12 @@ def get_product_reviews(driver, url, rank_num, target_review_count=100):
                     )
                 )
             )
+            # 드롭다운 버튼을 화면 중앙으로 스크롤
+            driver.execute_script(
+                "arguments[0].scrollIntoView({block: 'center'});", dropdown_trigger
+            )
+            time.sleep(0.5)
+
             # 현재 선택된 텍스트 확인 (디버깅용)
             # print(f"     -> 현재 드롭다운 상태: {dropdown_trigger.text.strip()}")
 
@@ -292,8 +315,7 @@ def get_product_reviews(driver, url, rank_num, target_review_count=100):
 
                     review_obj = {
                         "id": len(all_reviews_list) + 1,
-                        "filter_score": target_score,
-                        "real_score": rating,
+                        "score": rating,
                         "date": date,
                         "has_image": has_image,
                         "helpful_count": helpful_count,

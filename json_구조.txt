@@ -19,8 +19,8 @@
         "data": [
           {
             "id": "int",
+            "score": "int",
             "date": "string",
-            "rating": "int",
             "has_image": "boolean",
             "helpful_count": "int",
             "title": "string",
