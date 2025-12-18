@@ -25,8 +25,8 @@ def main():
     TARGETS = {"스킨": "486248", "로션": "486249"}
 
     PRODUCT_LIMIT = 100
-    REVIEW_TARGET = 10
-    MAX_REVIEWS_PER_SEARCH = 10
+    REVIEW_TARGET = 250
+    MAX_REVIEWS_PER_SEARCH = 10000
 
     print(">>> 전체 작업을 시작합니다...")
 
@@ -105,7 +105,7 @@ def main():
             for idx, url in enumerate(urls):
                 print(f"\n   [{idx+1}/{len(urls)}] 상품 처리 시작... ({search_key})")
 
-                MAX_RETRIES = 2
+                MAX_RETRIES = 3
                 success = False
 
                 for attempt in range(MAX_RETRIES):
@@ -257,7 +257,7 @@ def driver_cleanup(driver):
             print(f"드라이버 삭제 중 에러(무시됨): {e}")
         gc.collect()
         driver = None
-        time.sleep(20)
+        time.sleep(22)
     except Exception as e:
         print(f"드라이버 종료 중 에러(무시됨): {e}")
 
