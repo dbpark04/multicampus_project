@@ -165,6 +165,22 @@ def get_product_reviews(
             "reviews": {"total_count": 0, "text_count": 0, "data": []},
         }
 
+    # 총 리뷰 수가 0이면 바로 리턴
+    if int(total_reviews) == 0:
+        print("   -> [리뷰 없음] 총 리뷰 수가 0개입니다. 수집을 건너뜁니다.")
+        result_data["product_info"] = {
+            "product_id": product_id,
+            "brand": brand_name,
+            "category_path": category_str,
+            "product_name": product_name,
+            "price": price,
+            "delivery_type": delivery_type,
+            "total_reviews": total_reviews,
+            "product_url": url,
+            "rating_distribution": {"5": 0, "4": 0, "3": 0, "2": 0, "1": 0},
+        }
+        return result_data
+
     # -------------------------------------------------------
     # [리뷰 섹션 준비]
     # -------------------------------------------------------

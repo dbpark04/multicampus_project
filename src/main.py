@@ -169,6 +169,14 @@ def main():
                             r_data = data.get("reviews", {})
                             current_collected = r_data.get("total_count", 0)
 
+                            # 리뷰가 0개면 저장하지 않고 다음으로
+                            if current_collected == 0:
+                                print(
+                                    "     -> [스킵] 리뷰가 0개입니다. 저장하지 않고 다음 상품으로 넘어갑니다."
+                                )
+                                success = True
+                                break
+
                             keyword_total_collected += current_collected
                             keyword_total_text += r_data.get("text_count", 0)
                             driver_collected_count += current_collected
