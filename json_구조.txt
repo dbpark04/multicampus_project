@@ -23,6 +23,7 @@
             "id": "int",
             "score": "int",
             "date": "string",
+            "collected_at": "string",
             "nickname": "string",
             "has_image": "boolean",
             "helpful_count": "int",

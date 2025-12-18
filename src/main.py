@@ -152,16 +152,16 @@ def main():
                                 f"     -> 키워드 누적: {keyword_total_collected}개 / 드라이버 생애주기: {driver_collected_count}개"
                             )
 
-                            # 드라이버 생애주기에서 1000개 초과면 재시작, 아니면 유지
-                            if driver_collected_count > 1000:
+                            # 드라이버 생애주기에서 4500개 초과면 재시작, 아니면 유지
+                            if driver_collected_count > 4500:
                                 print(
-                                    f"     -> 드라이버 수집 {driver_collected_count}개 > 1000 → 드라이버 재시작"
+                                    f"     -> 드라이버 수집 {driver_collected_count}개 > 4500 → 드라이버 재시작"
                                 )
                                 driver = driver_cleanup(driver)
                                 driver_collected_count = 0  # 카운트 초기화
                             else:
                                 print(
-                                    f"     -> 드라이버 수집 {driver_collected_count}개 ≤ 1000 → 드라이버 유지"
+                                    f"     -> 드라이버 수집 {driver_collected_count}개 ≤ 4500 → 드라이버 유지"
                                 )
 
                             success = True

@@ -6,6 +6,7 @@ from selenium.common.exceptions import TimeoutException, WebDriverException
 from bs4 import BeautifulSoup
 import time
 import random
+from datetime import datetime
 
 
 def clean_text(text):
@@ -291,6 +292,8 @@ def get_product_reviews(driver, url, rank_num, target_review_count=100):
                 )
                 break
 
+            collected_timestamp = datetime.now().strftime("%Y.%m.%d %H:%M:%S")
+
             for article in review_articles:
                 if star_collected_count >= STAR_LIMIT:
                     break
@@ -355,6 +358,7 @@ def get_product_reviews(driver, url, rank_num, target_review_count=100):
                         "id": len(all_reviews_list) + 1,
                         "score": rating,
                         "date": date,
+                        "collected_at": collected_timestamp,
                         "nickname": nickname,
                         "has_image": has_image,
                         "helpful_count": helpful_count,
