@@ -290,7 +290,7 @@ def get_product_reviews(
     for star_info in STAR_RATINGS:
         target_score = star_info["score"]
         actual_count = rating_distribution.get(str(target_score), 0)
-        ten_percent = int(actual_count * 0.1)
+        ten_percent = int(actual_count * 0.25)
         dynamic_target = max(target_review_count, ten_percent)
         total_expected_collection += dynamic_target
 
@@ -321,10 +321,10 @@ def get_product_reviews(
             # print(f"\n   >>> [별점 스킵] '{target_text}' 리뷰 0개 - 수집하지 않음")
             continue
 
-        # 10% 계산
-        ten_percent = int(actual_count * 0.1)
+        # 25% 계산
+        ten_percent = int(actual_count * 0.25)
 
-        # 최종 수집 목표: max(REVIEW_TARGET, 10%)
+        # 최종 수집 목표: max(REVIEW_TARGET, 25%)
         dynamic_target = max(target_review_count, ten_percent)
 
         # print(f"\n   >>> [별점 변경] '{target_text}' 리뷰 수집 시작")
@@ -337,12 +337,11 @@ def get_product_reviews(
             review_section = driver.find_element(By.ID, "sdpReview")
             driver.execute_script("arguments[0].scrollIntoView(true);", review_section)
             driver.execute_script("window.scrollBy(0, -200);")  # 헤더 공간 확보
-            time.sleep(1)
+            time.sleep(0.7)
         except:
             # 리뷰 섹션을 못 찾으면 페이지 상단으로
             driver.execute_script("window.scrollTo(0, 0);")
-            time.sleep(1)
-
+            time.sleep(0.7)
         # 1. 별점 드롭다운 열기 (Test Script의 XPath 사용)
         try:
             dropdown_trigger = WebDriverWait(driver, 5).until(
@@ -363,7 +362,7 @@ def get_product_reviews(
             # print(f"     -> 현재 드롭다운 상태: {dropdown_trigger.text.strip()}")
 
             driver.execute_script("arguments[0].click();", dropdown_trigger)
-            time.sleep(0.7)  # 팝업 애니메이션 대기
+            time.sleep(0.6)  # 팝업 애니메이션 대기
 
         except Exception as e:
             print(f"     -> [SKIP] 드롭다운 버튼 클릭 실패: {e}")
@@ -388,7 +387,7 @@ def get_product_reviews(
             driver.execute_script("arguments[0].click();", star_option)
 
             # print(f"     -> 필터 적용 완료: {target_text}")
-            time.sleep(1.5)  # 리스트 갱신 대기 (중요)
+            time.sleep(0.8)  # 리스트 갱신 대기 (중요)
 
         except Exception as e:
             print(f"     -> [SKIP] 옵션('{target_text}') 클릭 실패: {e}")
@@ -527,7 +526,7 @@ def get_product_reviews(
                         next_arrow_btn,
                     )
                     driver.execute_script("arguments[0].click();", next_arrow_btn)
-                    time.sleep(random.uniform(0.6, 0.7))
+                    time.sleep(random.uniform(0.5, 0.6))
 
                     next_page_number = current_page_num + 1
                     next_block_first_btn = WebDriverWait(driver, 5).until(
@@ -539,7 +538,7 @@ def get_product_reviews(
                         )
                     )
                     driver.execute_script("arguments[0].click();", next_block_first_btn)
-                    time.sleep(random.uniform(0.35, 0.4))
+                    time.sleep(random.uniform(0.32, 0.35))
 
                     current_page_num = next_page_number
                     continue
@@ -560,7 +559,7 @@ def get_product_reviews(
                         "arguments[0].scrollIntoView({block: 'center'});", next_btn
                     )
                     driver.execute_script("arguments[0].click();", next_btn)
-                    time.sleep(random.uniform(0.35, 0.4))
+                    time.sleep(random.uniform(0.32, 0.35))
                     current_page_num += 1
                 except:
                     # print(
