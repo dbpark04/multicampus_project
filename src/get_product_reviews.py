@@ -305,10 +305,10 @@ def get_product_reviews(
             "reviews": {"total_count": 0, "text_count": 0, "data": []},
         }
     else:
-        print(
-            f"   -> [드라이버 체크] 현재: {driver_collected_count}개 + 예상: {total_expected_collection}개 = {driver_collected_count + total_expected_collection}개 ≤ 5500 → 진행"
-        )
-
+        # print(
+        #     f"   -> [드라이버 체크] 현재: {driver_collected_count}개 + 예상: {total_expected_collection}개 = {driver_collected_count + total_expected_collection}개 ≤ 5500 → 진행"
+        # )
+        pass
     for star_info in STAR_RATINGS:
         target_score = star_info["score"]
         target_text = star_info["text"]
@@ -318,7 +318,7 @@ def get_product_reviews(
 
         # 해당 별점의 리뷰가 0개면 드롭다운 클릭하지 않고 스킵
         if actual_count == 0:
-            print(f"\n   >>> [별점 스킵] '{target_text}' 리뷰 0개 - 수집하지 않음")
+            # print(f"\n   >>> [별점 스킵] '{target_text}' 리뷰 0개 - 수집하지 않음")
             continue
 
         # 10% 계산
@@ -327,10 +327,10 @@ def get_product_reviews(
         # 최종 수집 목표: max(REVIEW_TARGET, 10%)
         dynamic_target = max(target_review_count, ten_percent)
 
-        print(f"\n   >>> [별점 변경] '{target_text}' 리뷰 수집 시작")
-        print(
-            f"       실제 리뷰: {actual_count}개 | 10%: {ten_percent}개 | 기본 목표: {target_review_count}개 → 수집 목표: {dynamic_target}개"
-        )
+        # print(f"\n   >>> [별점 변경] '{target_text}' 리뷰 수집 시작")
+        # print(
+        #     f"       실제 리뷰: {actual_count}개 | 10%: {ten_percent}개 | 기본 목표: {target_review_count}개 → 수집 목표: {dynamic_target}개"
+        # )
 
         # 리뷰 섹션 상단으로 스크롤 (드롭다운 버튼이 보이도록)
         try:

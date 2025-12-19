@@ -1,6 +1,7 @@
 import json
 import time
 import random
+import os  # 파일 존재 여부 확인용
 import undetected_chromedriver as uc
 from selenium.common.exceptions import (
     UnexpectedAlertPresentException,
@@ -20,9 +21,9 @@ def main():
 
     # [방법 2] 카테고리 수집을 원할 때
     MODE = "CATEGORY"
-    TARGETS = {"스킨": "486248", "로션": "486249", "에센스_세럼_앰플": "486250"}
-    PRODUCT_LIMIT = 300
-    REVIEW_TARGET = 600
+    TARGETS = {"로션": "486249"}
+    PRODUCT_LIMIT = 200
+    REVIEW_TARGET = 200
     MAX_REVIEWS_PER_SEARCH = 50000
 
     print(">>> 전체 작업을 시작합니다...")
@@ -45,12 +46,63 @@ def main():
             else:
                 search_key = item[0]  # "스킨케어"
                 search_id = item[1]  # "486248"
+
+            # ---------------------------------------------------------
+            # [이어하기 기능] 기존 데이터 로드
+            # ---------------------------------------------------------
             crawled_data_list = []
             keyword_total_collected = 0
             keyword_total_text = 0
-
-            # 전체 별점 분포 집계
             total_rating_distribution = {"5": 0, "4": 0, "3": 0, "2": 0, "1": 0}
+            processed_urls = set()  # 이미 수집한 URL 집합
+
+            # 읽어올 파일명 후보 (중단된 파일 우선, 없으면 완료 파일 확인)
+            resume_filenames = [
+                f"result_{search_key}_interrupted.json",
+                f"result_{search_key}.json",
+            ]
+
+            for fname in resume_filenames:
+                if os.path.exists(fname):
+                    try:
+                        with open(fname, "r", encoding="utf-8") as f:
+                            existing_data = json.load(f)
+
+                        # 데이터 복원
+                        if "data" in existing_data:
+                            crawled_data_list = existing_data["data"]
+                            # URL 추출하여 집합에 추가
+                            for row in crawled_data_list:
+                                p_url = row.get("product_info", {}).get("product_url")
+                                if p_url:
+                                    processed_urls.add(p_url)
+
+                            # 통계 복원
+                            keyword_total_collected = existing_data.get(
+                                "total_collected_reviews", 0
+                            )
+                            keyword_total_text = existing_data.get(
+                                "total_text_reviews", 0
+                            )
+                            if "total_rating_distribution" in existing_data:
+                                total_rating_distribution = existing_data[
+                                    "total_rating_distribution"
+                                ]
+
+                        print(
+                            f"\n>>> [이어하기] '{fname}' 파일 발견! 기존 데이터 {len(crawled_data_list)}개 로드 완료."
+                        )
+                        print(
+                            f">>> [이어하기] 이미 수집된 URL {len(processed_urls)}개는 건너뜁니다."
+                        )
+                        break
+                    except Exception as e:
+                        print(
+                            f">>> [이어하기] 파일 읽기 실패 (무시하고 새로 시작): {e}"
+                        )
+
+            # 전체 별점 분포 집계 (기존 코드에서는 여기 위치했으나 위로 이동함)
+            # total_rating_distribution = {"5": 0, "4": 0, "3": 0, "2": 0, "1": 0}
 
             # ---------------------------------------------------------
             # [단계 1] URL 수집
@@ -95,9 +147,22 @@ def main():
                     print(
                         f">>> [{search_key}] 중복 제거 후 URL {len(urls)}개 확보 완료"
                     )
+
+                    # ---------------------------------------------------------
+                    # [이어하기 기능] 이미 수집된 URL 필터링
+                    # ---------------------------------------------------------
+                    if processed_urls:
+                        original_count = len(urls)
+                        # 기존에 없는 URL만 남김
+                        urls = [u for u in urls if u not in processed_urls]
+                        skipped_count = original_count - len(urls)
+                        print(
+                            f">>> [이어하기] 기존 {skipped_count}개 URL 제외 -> 남은 URL {len(urls)}개"
+                        )
+
                     time.sleep(1)
                     # 성공하면 루프 탈출
-                    if urls:
+                    if urls or processed_urls:
                         break
                     else:
                         print(f">>> URL 수집 실패 (0개) - 재시도합니다.")
@@ -114,11 +179,17 @@ def main():
                     print(">>> 20초 대기 후 재시도...")
                     time.sleep(20)
 
-            if not urls:
+            if not urls and not processed_urls:
                 print(
                     f">>> [{search_key}] {URL_COLLECT_MAX_RETRIES}번 시도 후에도 URL을 수집하지 못했습니다. 넘어갑니다."
                 )
                 continue
+
+            if not urls and processed_urls:
+                print(
+                    f">>> [{search_key}] 이미 모든 URL을 수집했습니다. 다음으로 넘어갑니다."
+                )
+                # 저장 로직을 거치도록 urls=[] 상태로 진행
 
             # ---------------------------------------------------------
             # [단계 2] 개별 상품 리뷰 수집 (리뷰 수에 따라 드라이버 재사용/재시작)
@@ -130,6 +201,14 @@ def main():
             driver_collected_count = 0  # 현재 드라이버가 수집한 총 리뷰 개수
 
             for idx, url in enumerate(urls):
+                # 타겟 리뷰 개수 도달 체크 (기존 데이터 포함)
+                if keyword_total_collected >= MAX_REVIEWS_PER_SEARCH:
+                    print(
+                        f"\n>>> [{search_key}] 타겟 리뷰 개수({MAX_REVIEWS_PER_SEARCH}개) 도달!"
+                    )
+                    print(f">>> 수집을 종료하고 저장합니다.")
+                    break
+
                 print(f"\n   [{idx+1}/{len(urls)}] 상품 처리 시작... ({search_key})")
 
                 MAX_RETRIES = 3
@@ -260,6 +339,15 @@ def main():
                 with open(filename, "w", encoding="utf-8") as f:
                     json.dump(result_json, f, indent=2, ensure_ascii=False)
                 print(f"\n [{search_key}] 저장 완료: {filename}")
+
+                # [이어하기 기능] 완료되었으므로 임시 중단 파일 삭제
+                interrupted_file = f"result_{search_key}_interrupted.json"
+                if os.path.exists(interrupted_file):
+                    try:
+                        os.remove(interrupted_file)
+                        print(f"     -> 임시 중단 파일 삭제됨: {interrupted_file}")
+                    except:
+                        pass
             else:
                 print(f"\n[{search_key}] 수집된 데이터가 없습니다.")
 
