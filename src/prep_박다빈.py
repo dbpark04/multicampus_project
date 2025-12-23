@@ -4,12 +4,12 @@ from collections import Counter
 
 
 def drop_missing_val():
-    EXCLUDE_TEXT_FIELDS = {"title", "content", "full_text"}
-
     INPUT_PATH = "result_아이라이너.json"   # 파일명 예시
     OUTPUT_WITH_TEXT = "with_text_drop_missing.json"
     OUTPUT_WITHOUT_TEXT = "without_text_drop_missing.json"
 
+    DROP_0 = {"helpful_count"}
+    DROP_FALSE = {"has_image"}
 
     def has_text(review: dict) -> bool:
         for k in ["content", "full_text"]:
@@ -18,15 +18,26 @@ def drop_missing_val():
                 return True
         return False
 
-
+    # 결측값이거나 무의이한 값인 경우 key 삭제
     def drop_missing_fields(obj: dict):
         for k in list(obj.keys()):
-            if k in EXCLUDE_TEXT_FIELDS:
-                continue
-
             v = obj[k]
+
+            # 문자열 None, ""
             if v is None or (isinstance(v, str) and v.strip() == ""):
                 del obj[k]
+                continue
+            
+            # 숫자 0
+            if k in DROP_0 and v == 0:
+                del obj[k]
+                continue
+
+            # False
+            if k in DROP_FALSE and v is False:
+                del obj[k]
+                continue
+
 
 
     def init_metadata(data: dict):
