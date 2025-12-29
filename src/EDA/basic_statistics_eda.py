@@ -156,11 +156,13 @@ def update_basic_stat_counters(
     """
     상품 1개 단위로 기본 통계 누적 업데이트
     """
-    pid = to_int_safe(product_info.get("product_id"))
-    if pid is None:
+    pid = product_info.get("product_id")
+    if not pid:
         meta["missing_product_id"] += 1
         return
 
+    # 문자열 ID를 그대로 사용
+    pid = str(pid)
     category = extract_category(product_info)
 
     # 1) 카테고리별 distinct 상품 수
@@ -202,8 +204,11 @@ def build_category_product_table(category_products: Dict[str, set]) -> pd.DataFr
     )
 
 
-def build_product_review_table(product_review_cnt: Dict[int, int]) -> pd.DataFrame:
+def build_product_review_table(product_review_cnt: Dict[str, int]) -> pd.DataFrame:
     """상품별 수집 리뷰 수 테이블."""
+    if not product_review_cnt:
+        return pd.DataFrame(columns=["product_id", "review_cnt"])
+
     return (
         pd.DataFrame(
             [{"product_id": k, "review_cnt": v} for k, v in product_review_cnt.items()]
@@ -419,14 +424,4 @@ def run_basic_review_stats(
     return result
 
 
-if __name__ == "__main__":
-    # 1. 통계 분석 실행 (기본 경로: data/processed_data)
-    # 결과는 result 변수에 담기고, 동시에 파일로도 저장됩니다.
-    result = run_basic_review_stats()
-
-    # 2. 콘솔에서 간단히 결과 확인
-    print("=" * 50)
-    print(f"분석 완료된 파일 수: {result['meta']['n_files']}개")
-    print(f"전체 리뷰 수: {result['meta']['total_reviews_collected']}개")
-    print(f"저장된 경로: {result.get('saved_paths')}")
-    print("=" * 50)
+run_basic_review_stats()
