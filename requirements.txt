@@ -6,6 +6,8 @@ beautifulsoup4
 # 자연어 처리 라이브러리
 konlpy
 gensim
+transformers
+torch
 
 # 데이터 처리 라이브러리
 numpy

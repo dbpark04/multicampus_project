@@ -18,5 +18,7 @@ dependencies:
       - undetected-chromedriver
       - beautifulsoup4
       - wordcloud
+      - transformers
+      - torch
 # 설치 법
 # conda env update -f environment.yml

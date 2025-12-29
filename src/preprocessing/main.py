@@ -21,6 +21,13 @@ from sentiment_analysis import analyze_skin_type_frequency
 # 임시 토큰 저장 디렉토리
 TEMP_TOKENS_DIR = "./data/temp_tokens"
 
+# ========== 벡터화 방법 설정 ==========
+# "word2vec": Word2Vec 사용 (기본, 빠름)
+# "bert": BERT 사용 (느리지만 성능 좋음)
+# "both": 둘 다 생성 (word2vec, bert 컬럼 모두 포함)
+VECTORIZER_TYPE = "both"  # 여기를 변경하여 선택
+BERT_MODEL_NAME = "klue/bert-base"  # BERT 모델 이름
+
 
 def main():
     """
@@ -41,6 +48,7 @@ def main():
     print("\n" + "=" * 60)
     print(f"{'최적화된 전처리 파이프라인 시작':^60}")
     print(f"{'시작 시간: ' + start_datetime:^60}")
+    print(f"{'벡터화 방법: ' + VECTORIZER_TYPE:^60}")
     print("=" * 60 + "\n")
 
     # pre_data 디렉토리의 모든 JSON 파일 찾기
@@ -97,15 +105,31 @@ def main():
     print(f"  처리 완료: {len(phase1_results)}개")
     print(f"  건너뜀: {skipped_count}개\n")
 
-    # ========== Phase 2: Word2Vec 학습 ==========
+    # ========== Phase 2: 벡터화 모델 준비 ==========
     phase2_start = time.time()
-    w2v_model = train_global_word2vec(TEMP_TOKENS_DIR)
-    phase2_time = time.time() - phase2_start
-    print(f"Phase 2 완료 - 소요 시간: {phase2_time:.2f}초\n")
+    w2v_model = None
+    bert_vectorizer = None
 
-    if not w2v_model:
-        print("[오류] Word2Vec 모델 학습 실패")
-        return
+    if VECTORIZER_TYPE in ["word2vec", "both"]:
+        print("\n" + "=" * 60)
+        print("Phase 2-1: Word2Vec 모델 학습")
+        print("=" * 60)
+        w2v_model = train_global_word2vec(TEMP_TOKENS_DIR)
+        if not w2v_model:
+            print("[오류] Word2Vec 모델 학습 실패")
+            if VECTORIZER_TYPE == "word2vec":
+                return
+
+    if VECTORIZER_TYPE in ["bert", "both"]:
+        print("\n" + "=" * 60)
+        print("Phase 2-2: BERT 모델 로딩")
+        print("=" * 60)
+        from bert_vectorizer import get_bert_vectorizer
+
+        bert_vectorizer = get_bert_vectorizer(BERT_MODEL_NAME)
+
+    phase2_time = time.time() - phase2_start
+    print(f"\nPhase 2 완료 - 소요 시간: {phase2_time:.2f}초\n")
 
     # ========== Phase 3: 병렬 벡터화 + 대표 리뷰 선정 ==========
     print("=" * 60)
@@ -116,7 +140,14 @@ def main():
 
     # Phase 1에서 처리된 파일들에 대해 벡터화 실행
     vectorize_args = [
-        (result["base_name"], TEMP_TOKENS_DIR, result["output_dir"], w2v_model)
+        (
+            result["base_name"],
+            TEMP_TOKENS_DIR,
+            result["output_dir"],
+            w2v_model,
+            bert_vectorizer,
+            VECTORIZER_TYPE,
+        )
         for result in phase1_results
     ]
 
