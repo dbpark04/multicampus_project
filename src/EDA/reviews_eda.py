@@ -1,3 +1,4 @@
+import os
 import json
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -6,6 +7,7 @@ from wordcloud import WordCloud
 from itertools import chain
 import seaborn as sns
 import random
+import matplotlib.gridspec as gridspec
 
 from matplotlib import rc
 import platform
@@ -17,8 +19,6 @@ if platform.system() == "Windows":
 # 파일 경로 바꿔야 함
 JSON_PATH = "data/processed_data/선케어_태닝/선케어/processed_선스틱_with_text.json"
 
-with open(JSON_PATH, "r", encoding="utf-8") as f:
-    raw = json.load(f)
 
 
 def vs_eda():
@@ -62,11 +62,13 @@ def vs_eda():
                 }
             )
 
-    df = pd.DataFrame(rows)
 
-    print("\n===== 데이터프레임 =====")
-    print(df.head())
-    print(df.info())
+    # label 없는 리뷰 제거
+    df_wc = df.dropna(subset=["label"])
+
+    # tokens가 리스트인 것만
+    df_wc = df_wc[df_wc["tokens"].apply(lambda x: isinstance(x, list) and len(x) > 0)]
+
 
     # df["has_iamge"] = (df["has_iamge"].replace("", 0).fillna(0).astype(int))
     df["helpful_count"] = df["helpful_count"].replace("", 0).fillna(0).astype(int)
@@ -76,8 +78,6 @@ def vs_eda():
     print(df["score"].value_counts().sort_index())
 
     # 리뷰 길이
-    df["review_len"] = df["full_text"].astype(str).apply(len)
-
     print("\n===== 리뷰 길이 통계 =====")
     print(df["review_len"].describe())
 
@@ -119,7 +119,9 @@ def vs_eda():
     # 상관계수
     print("\n===== 상관계수 =====")
     print("score - helpful_count :", df["score"].corr(df["helpful_count"]))
-    # print("score - has_image :", df["score"].corr(df["has_iamge"]))   # 분산 0이라서 상관계수x
+    print("score - has_image :", df["score"].corr(df["has_image"]))
+
+    corr_product = product_score["mean_score"].corr(product_score["mean_helpful"])
 
     # 시각화
     fig, axes = plt.subplots(2, 3, figsize=(12, 8))
@@ -134,20 +136,28 @@ def vs_eda():
     axes[0, 1].set_xlabel("리뷰 길이")
     axes[0, 1].set_ylabel("개수")
 
-    df.groupby("score")["review_len"].mean().plot(kind="bar", ax=axes[1, 0])
-    axes[1, 0].set_title("평점별 평균 리뷰 길이")
+    axes[0, 2].scatter(df["review_len"], df["helpful_count"], alpha=0.3)
+    axes[0, 2].set_xscale("log")
+    axes[0, 2].set_yscale("log")
+    axes[0, 2].set_title("리뷰 길이 vs Helpful Count")
+    axes[0, 2].set_xlabel("리뷰 길이 (log)")
+    axes[0, 2].set_ylabel("Helpful Count (log)")
+
+    sns.violinplot(x="score", y="review_len", data=df, ax=axes[1, 0])
+    axes[1, 0].set_title("평점별 리뷰 길이")
     axes[1, 0].set_xlabel("평점")
-    axes[1, 0].set_ylabel("평균 길이")
+    axes[1, 0].set_ylabel("리뷰 길이")
 
-    df.groupby("score")["helpful_count"].mean().plot(kind="bar", ax=axes[1, 1])
-    axes[1, 1].set_title("평점별 평균 helpful_count")
+    sns.boxplot(x="score", y="helpful_count", data=df, ax=axes[1, 1])
+    axes[1, 1].set_yscale("log")
+    axes[1, 1].set_title("평점별 Helpful Count")
     axes[1, 1].set_xlabel("평점")
-    axes[1, 1].set_ylabel("평균 helpful_count 수")
+    axes[1, 1].set_ylabel("helpful_count")
 
-    axes[0, 2].scatter(df["score"], df["helpful_count"], alpha=0.3)
-    axes[0, 2].set_title("평점 & Helpful Count")
-    axes[0, 2].set_xlabel("평점")
-    axes[0, 2].set_ylabel("Helpful Count")
+    axes[1, 2].scatter(product_score["mean_score"], product_score["mean_helpful"])
+    axes[1, 2].set_title("상품 평균 평점 vs 평균 Helpful")
+    axes[1, 2].set_xlabel("평균 평점")
+    axes[1, 2].set_ylabel("평균 helpful_count")
 
     plt.tight_layout()
     plt.show()
@@ -156,9 +166,20 @@ def vs_eda():
     pos_text = " ".join(pos_tokens)
     neg_text = " ".join(neg_tokens)
 
+    ax3 = fig.add_subplot(gs[1, :])
+    time_score = (df.dropna(subset=["review_date"]).set_index("review_date").resample("ME")["score"].mean())
+    time_score.plot(ax=ax3, linewidth=2)
+    ax3.set_title("월별 평균 평점 추이")
+
+    plt.tight_layout()
+    plt.show()
+
+
+    # ===== 긍/부정 키워드 워드클라우드 =====
     pos_palette = sns.color_palette("OrRd", 10)
     neg_palette = sns.color_palette("Blues", 10)
 
+    # 팔레트
     def wc_color(palette):
         def color_func(
             word, font_size, position, orientation, random_state=None, **kwargs
@@ -188,13 +209,19 @@ def vs_eda():
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 6))
 
-    axes[0].imshow(wc_pos)
+    if wc_pos:
+        axes[0].imshow(wc_pos)
+        axes[0].set_title("긍정 리뷰 워드클라우드")
+    else:
+        axes[0].text(0.5, 0.5, "긍정 리뷰 단어 없음", ha="center", va="center")
     axes[0].axis("off")
-    axes[0].set_title("긍정 리뷰 워드클라우드")
 
-    axes[1].imshow(wc_neg)
+    if wc_neg:
+        axes[1].imshow(wc_neg)
+        axes[1].set_title("부정 리뷰 워드클라우드")
+    else:
+        axes[1].text(0.5, 0.5, "부정 리뷰 단어 없음", ha="center", va="center")
     axes[1].axis("off")
-    axes[1].set_title("부정 리뷰 워드클라우드")
 
     plt.tight_layout()
     plt.show()
