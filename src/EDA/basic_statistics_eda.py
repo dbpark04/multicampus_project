@@ -73,7 +73,7 @@ def extract_category(product_info: Dict[str, Any]) -> str:
       2) category_path 마지막 토큰(> 기준)
       3) UNKNOWN
     """
-    cat = product_info.get("category_norm")
+    cat = product_info.get("category_norm") or product_info.get("category_normal")
     if cat:
         return str(cat)
 
@@ -149,10 +149,12 @@ def iter_products_with_reviews(
         return
 
     for item in data_list:
-        product_info = item.get("product_info", {}) or {}
+        # item["product_info"]를 product_info 로 대체
+        product_info = item.get("product_info") or item or {}
+
         yield product_info, []
 
-# =========================
+
 # 상품과 리뷰의 기본 통계 계산
 # =========================
 
@@ -170,6 +172,11 @@ def update_basic_stat_counters(
     - product_info의 total_reviews, rating_distribution만 사용
     """
     pid = product_info.get("product_id")
+    
+    # 다른 키 후보도 허용
+    if not pid:
+        pid = product_info.get("id") or product_info.get("productId") or product_info.get("product_no")
+
     if not pid:
         meta["missing_product_id"] += 1
         return
@@ -224,6 +231,9 @@ def update_basic_stat_counters(
 
 def build_category_product_table(category_products: Dict[str, set]) -> pd.DataFrame:
     """카테고리별 distinct 상품 수 테이블."""
+    if not category_products:
+        return pd.DataFrame(columns=["category", "product_cnt"])
+
     return (
         pd.DataFrame(
             [
@@ -292,6 +302,9 @@ def build_review_count_bins(
 
 def build_score_distribution_table(score_cnt: Counter) -> pd.DataFrame:
     """전체 별점 분포 테이블(score, cnt)."""
+    if not score_cnt:
+        return pd.DataFrame(columns=["score", "cnt"])
+
     return (
         pd.DataFrame([{"score": k, "cnt": v} for k, v in score_cnt.items()])
         .sort_values("score")
