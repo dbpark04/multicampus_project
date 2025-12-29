@@ -19,7 +19,7 @@ import pandas as pd
 class BasicStatsConfig:
     """
     기본 통계량 산출 설정
-    - file_suffix: 통계를 낼 파일 패턴(기본은 텍스트 없는 버전 추천)
+    - file_suffix: 통계를 낼 파일 패턴
     - review_cnt_bins: 상품별 리뷰 수 분포를 만들 때 bin 경계
     - valid_scores: 유효 별점 범위
     - save_outputs: 결과 DF 저장 여부
@@ -27,13 +27,17 @@ class BasicStatsConfig:
     - save_format: 저장 포맷("parquet" or "csv")
     """
 
-    file_suffix: str = "_without_text.json"
+    file_suffix: str = "auto"
     review_cnt_bins: Tuple[int, ...] = (1, 2, 3, 5, 10, 20, 50, 100, 200, 500, 1000)
     valid_scores: Tuple[int, ...] = (1, 2, 3, 4, 5)
 
     save_outputs: bool = True
     output_dirname: str = "eda_outputs"
     save_format: str = "parquet"  # "parquet" or "csv"
+
+    # JSON 1개로 묶어 저장 옵션(기본 True)
+    save_summary_json: bool = True
+    summary_json_name: str = "basic_stats_summary.json"
 
 
 def init_review_stat_counters() -> Dict[str, Any]:
@@ -91,6 +95,21 @@ def find_review_json_files(processed_root: str | Path, suffix: str) -> List[Path
     """
     root = Path(processed_root)
     return sorted(root.rglob(f"*{suffix}"))
+
+
+# *_with_text.json 과 *_without_text.json 파일을 모두 수집하여 통합 분석
+def resolve_input_files(processed_root: str | Path, cfg: BasicStatsConfig) -> List[Path]:
+    root = Path(processed_root)
+
+    if isinstance(cfg.file_suffix, str) and cfg.file_suffix.upper() == "AUTO":
+        with_files = sorted(root.rglob("*_with_text.json"))
+        without_files = sorted(root.rglob("*_without_text.json"))
+
+        # with, without 합치고(Union), 중복 제거 후 정렬
+        all_files = sorted({*with_files, *without_files})
+        return all_files
+
+    return find_review_json_files(root, cfg.file_suffix)
 
 
 def load_review_json(path: str | Path) -> Dict[str, Any]:
@@ -376,6 +395,39 @@ def save_basic_stat_tables(
 
 
 # ==========================
+# 최상단 키 고정 
+# ==========================
+
+
+def tables_json(tables: Dict[str, pd.DataFrame], meta: Dict[str, Any]) -> Dict[str, Any]:
+    mapping = {
+        "카테고리별 개수": "category_product_counts",
+        "카테고리_리뷰 점수별 개수": "category_score_distribution",
+        "카테고리 평균별점": "category_score_summary",
+        "전체 리뷰 개수별 카운트": "product_review_count_bins",
+        "요약": "product_review_count_summary",
+        "상품별 리뷰 내림차순": "product_review_counts",
+        "점수별 개수": "score_distribution",
+    }
+
+    out: Dict[str, Any] = {"meta": meta}
+
+    for kor_key, table_key in mapping.items():
+        df = tables.get(table_key, pd.DataFrame())
+        out[kor_key] = df.to_dict(orient="records")
+
+    return out
+
+
+def save_json(payload: Dict[str, Any], output_path: str | Path) -> str:
+    p = Path(output_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    return str(p)
+
+
+# ==========================
 # 기본 통계 분석 전체 실행 함수
 # ==========================
 
@@ -399,7 +451,8 @@ def run_basic_review_stats(
     meta["missing_product_id"] += 0
     meta["invalid_score"] += 0
 
-    files = find_review_json_files(processed_root, cfg.file_suffix)
+    # resolve_input_files 사용 (AUTO 지원)
+    files = resolve_input_files(processed_root, cfg)
     meta["n_files"] = len(files)
 
     for fp in files:
@@ -417,11 +470,17 @@ def run_basic_review_stats(
 
     if cfg.save_outputs:
         output_dir = Path(processed_root) / cfg.output_dirname
-        result["saved_paths"] = save_basic_stat_tables(
-            tables, output_dir, cfg.save_format
-        )
+        result["saved_paths"] = save_basic_stat_tables(tables, output_dir, cfg.save_format)
+
+    # JSON 저장
+    if cfg.save_summary_json:
+        output_dir = Path(processed_root) / cfg.output_dirname
+        payload = tables_json(tables, meta=dict(meta))
+        json_path = output_dir / cfg.summary_json_name
+        result["team_json_path"] = save_json(payload, json_path)
 
     return result
 
 
-run_basic_review_stats()
+if __name__ == "__main__":
+    run_basic_review_stats()
