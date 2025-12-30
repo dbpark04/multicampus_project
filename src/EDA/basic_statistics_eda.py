@@ -98,12 +98,14 @@ def find_review_json_files(processed_root: str | Path, suffix: str) -> List[Path
 
 
 # *_with_text.json 과 *_without_text.json 파일을 모두 수집하여 통합 분석
-def resolve_input_files(processed_root: str | Path, cfg: BasicStatsConfig) -> List[Path]:
+def resolve_input_files(
+    processed_root: str | Path, cfg: BasicStatsConfig
+) -> List[Path]:
     root = Path(processed_root)
 
     if isinstance(cfg.file_suffix, str) and cfg.file_suffix.upper() == "AUTO":
         with_files = sorted(root.rglob("*_with_text.json"))
-        # AUTO: with_text 우선 사용(중복 집계 방지). 없으면 without_text 사용        
+        # AUTO: with_text 우선 사용(중복 집계 방지). 없으면 without_text 사용
         if with_files:
             return with_files
         return sorted(root.rglob("*_without_text.json"))
@@ -172,10 +174,14 @@ def update_basic_stat_counters(
     - product_info의 total_reviews, rating_distribution만 사용
     """
     pid = product_info.get("product_id")
-    
+
     # 다른 키 후보도 허용
     if not pid:
-        pid = product_info.get("id") or product_info.get("productId") or product_info.get("product_no")
+        pid = (
+            product_info.get("id")
+            or product_info.get("productId")
+            or product_info.get("product_no")
+        )
 
     if not pid:
         meta["missing_product_id"] += 1
@@ -421,19 +427,21 @@ def save_basic_stat_tables(
 
 
 # ==========================
-# 최상단 키 고정 
+# 최상단 키 고정
 # ==========================
 
 
-def tables_json(tables: Dict[str, pd.DataFrame], meta: Dict[str, Any]) -> Dict[str, Any]:
+def tables_json(
+    tables: Dict[str, pd.DataFrame], meta: Dict[str, Any]
+) -> Dict[str, Any]:
     mapping = {
-        "카테고리별 개수": "category_product_counts",
-        "카테고리_리뷰 점수별 개수": "category_score_distribution",
-        "카테고리 평균별점": "category_score_summary",
-        "전체 리뷰 개수별 카운트": "product_review_count_bins",
-        "요약": "product_review_count_summary",
-        "상품별 리뷰 내림차순": "product_review_counts",
-        "점수별 개수": "score_distribution",
+        "category_count": "category_product_counts",
+        "category_score_part_count": "category_score_distribution",
+        "category_mean_score": "category_score_summary",
+        "total_review_bins_count": "product_review_count_bins",
+        "summary": "product_review_count_summary",
+        "product_review_descending": "product_review_counts",
+        "score_count": "score_distribution",
     }
 
     out: Dict[str, Any] = {"meta": meta}
@@ -478,7 +486,7 @@ def run_basic_review_stats(
     meta["invalid_score"] += 0
     meta["missing_rating_distribution"] += 0
     # total_reviews와 rating_distribution 합이 다른 상품 수
-    meta["review_cnt_mismatch"] += 0 
+    meta["review_cnt_mismatch"] += 0
 
     # resolve_input_files 사용 (AUTO 지원)
     files = resolve_input_files(processed_root, cfg)
@@ -499,7 +507,9 @@ def run_basic_review_stats(
 
     if cfg.save_outputs:
         output_dir = Path(processed_root) / cfg.output_dirname
-        result["saved_paths"] = save_basic_stat_tables(tables, output_dir, cfg.save_format)
+        result["saved_paths"] = save_basic_stat_tables(
+            tables, output_dir, cfg.save_format
+        )
 
     # JSON 저장
     if cfg.save_summary_json:
