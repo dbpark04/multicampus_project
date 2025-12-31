@@ -115,20 +115,39 @@ def sentiment_tfidf_diff(reviews, top_n=30, min_doc_freq=20):
     if not pos_sum and not neg_sum:
         return [], []
 
+    # 전체 긍정/부정 리뷰 수 계산 (클래스 불균형 보정용)
+    total_pos = sum(1 for r in reviews if r.get("label") == 1)
+    total_neg = sum(1 for r in reviews if r.get("label") == 0)
+
     rows = []
     for w in set(pos_sum.keys()) | set(neg_sum.keys()):
         pc = pos_cnt.get(w, 0)
         nc = neg_cnt.get(w, 0)
 
-        if max(pc, nc) < min_doc_freq:
+        # 전체 support가 최소 빈도를 만족해야 함
+        support = pc + nc
+        if support < min_doc_freq:
             continue
 
+        # 1. 문서 출현 비율 계산 (클래스 불균형 보정)
+        pos_rate = pc / total_pos if total_pos > 0 else 0
+        neg_rate = nc / total_neg if total_neg > 0 else 0
+
+        # 2. 균형 잡힌 비율 (Balanced Ratio)
+        # 긍정에서 더 잘 나오면 양수, 부정에서 더 잘 나오면 음수
+        if (pos_rate + neg_rate) == 0:
+            balanced_ratio = 0
+        else:
+            balanced_ratio = (pos_rate - neg_rate) / (pos_rate + neg_rate)
+
+        # 3. 평균 TF 차이
         pos_mean = (pos_sum[w] / pc) if pc else 0.0
         neg_mean = (neg_sum[w] / nc) if nc else 0.0
         diff = pos_mean - neg_mean
 
-        support = pc + nc
-        score = diff * math.log1p(support)
+        # 4. 최종 점수: abs(diff)로 강도만 반영, balanced_ratio가 방향성 결정
+        # 이렇게 하면 음수 × 음수 = 양수가 되는 부호 반전 현상 방지
+        score = abs(diff) * math.log1p(support) * balanced_ratio
 
         rows.append(
             {
@@ -139,6 +158,7 @@ def sentiment_tfidf_diff(reviews, top_n=30, min_doc_freq=20):
                 "pos_doc_count": pc,
                 "neg_doc_count": nc,
                 "support": support,
+                "balanced_ratio": balanced_ratio,
                 "score": score,
             }
         )
@@ -158,6 +178,7 @@ def sentiment_tfidf_diff(reviews, top_n=30, min_doc_freq=20):
             "pos_n": int(r["pos_doc_count"]),
             "neg_n": int(r["neg_doc_count"]),
             "support": int(r["support"]),
+            "balanced_ratio": float(r["balanced_ratio"]),
             "score": float(r["score"]),
         }
         for r in rows_sorted[:top_n]
@@ -172,6 +193,7 @@ def sentiment_tfidf_diff(reviews, top_n=30, min_doc_freq=20):
             "pos_n": int(r["pos_doc_count"]),
             "neg_n": int(r["neg_doc_count"]),
             "support": int(r["support"]),
+            "balanced_ratio": float(r["balanced_ratio"]),
             "score": float(r["score"]),
         }
         for r in reversed(rows_sorted[-top_n:])
