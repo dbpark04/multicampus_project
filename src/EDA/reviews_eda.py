@@ -235,7 +235,7 @@ for i, pid in enumerate(top_6_product_ids):
     rating_dist.plot(kind="bar", stacked=True, ax=ax1)
     ax1.set_title(f"{product_name}\n월별 평점 & 리뷰 수 분포", pad=20)
     ax1.set_xlabel("월")
-    ax1.set_ylabel("리뷰 수(평점 분포)")
+    ax1.set_ylabel("리뷰 수")
 
     x_labels = rating_dist.index.tolist()
     new_labels = []
@@ -252,17 +252,18 @@ for i, pid in enumerate(top_6_product_ids):
             new_labels.append("")
     ax1.set_xticklabels(new_labels, rotation=45, ha="right")
 
-    # 평균 평점 텍스트 표시
-    for x, (ym, mean) in enumerate(monthly_mean.items()):
-        y_pos = rating_dist.loc[ym].sum() * 0.95
-        ax1.text(x, y_pos, f"★ {mean:.2f}", ha="center", fontsize=9)
+    # # 평균 평점 텍스트 표시
+    # for x, (ym, mean) in enumerate(monthly_mean.items()):
+    #     y_pos = rating_dist.loc[ym].sum() * 0.95
+    #     ax1.text(x, y_pos, f"★ {mean:.2f}", ha="center", fontsize=9)
 
     ax2 = ax1.twinx()
-    monthly_count.plot(color='blue', linewidth=1, label="리뷰 수", ax=ax2)
-    ax2.set_ylabel("리뷰 수")
+    monthly_mean.plot(color='blue', linewidth=1, label="월별 평균 평점", ax=ax2)
+    ax2.set_ylabel("평균 평점")
+    ax2.set_ylim(1, 5)
     ax2.legend(loc="upper right")
 
-    x_labels2 = monthly_count.index.tolist()
+    x_labels2 = monthly_mean.index.tolist()
     new_labels2 = []
     prev_year2 = None
     for idx, ym in enumerate(x_labels2):
