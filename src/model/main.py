@@ -108,6 +108,46 @@ def save_model(model):
     print(f"\n모델 저장 완료: {MODEL_PATH}")
 
 
+def predict_sample(model, X_test, y_test, df_test, n_samples=5):
+    """
+    샘플 데이터로 긍정/부정 확률 예측
+
+    Args:
+        model: 학습된 모델
+        X_test: 테스트 벡터
+        y_test: 테스트 레이블
+        df_test: 테스트 DataFrame (원본 텍스트 확인용)
+        n_samples: 예측할 샘플 개수
+    """
+    print("\n" + "=" * 60)
+    print(f"샘플 {n_samples}개 예측 결과")
+    print("=" * 60)
+
+    # 랜덤 샘플 선택
+    sample_indices = np.random.choice(len(X_test), size=n_samples, replace=False)
+
+    for i, idx in enumerate(sample_indices, 1):
+        # 예측
+        sample_vector = X_test[idx].reshape(1, -1)
+        prediction = model.predict(sample_vector)[0]
+        probabilities = model.predict_proba(sample_vector)[0]
+
+        # 실제 정보
+        actual_label = y_test[idx]
+        review_info = df_test.iloc[idx]
+
+        print(f"\n[샘플 {i}]")
+        print(f"상품 ID: {review_info['product_id']}")
+        print(f"리뷰 텍스트: {review_info['full_text'][:100]}...")
+        print(f"실제 평점: {review_info['score']}점")
+        print(f"실제 레이블: {'긍정(1)' if actual_label == 1 else '부정(0)'}")
+        print(f"예측 레이블: {'긍정(1)' if prediction == 1 else '부정(0)'}")
+        print(f"예측 확률:")
+        print(f"  - 부정(0): {probabilities[0]:.2%}")
+        print(f"  - 긍정(1): {probabilities[1]:.2%}")
+        print(f"결과: {'정답' if prediction == actual_label else '오답'}")
+
+
 def main():
     """메인 실행 함수"""
     print("=" * 60)
@@ -119,8 +159,8 @@ def main():
 
     # 2. Train/Test 분할 (8:2, stratify로 클래스 비율 유지)
     print("\n데이터 분할 중 (Train:Test = 8:2)...")
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
+    X_train, X_test, y_train, y_test, df_train, df_test = train_test_split(
+        X, y, df, test_size=0.2, random_state=42, stratify=y
     )
 
     print(f"Train 데이터: {len(X_train):,}개")
@@ -139,6 +179,9 @@ def main():
 
     # 4. 모델 저장
     save_model(model)
+
+    # 5. 샘플 예측 데모
+    predict_sample(model, X_test, y_test, df_test, n_samples=5)
 
     print("\n" + "=" * 60)
     print("학습 완료!")
