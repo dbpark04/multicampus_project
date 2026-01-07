@@ -466,6 +466,32 @@ def vectorize_file(args):
 
             product_summaries.append(product_info)
 
+        # without_text의 리뷰도 review_details에 추가
+        for product in without_text.get("data", []):
+            product_info_without = product.get("product_info", {})
+            product_id = product_info_without.get("product_id")
+
+            for review in product.get("reviews", {}).get("data", []):
+                review_detail = {
+                    "product_id": product_id,
+                    "id": review.get("id"),
+                    "full_text": "",  # 텍스트 없음
+                    "title": review.get("title", ""),
+                    "content": review.get("content", ""),
+                    "score": review.get("score"),
+                    "label": None,  # 텍스트 없으므로 라벨 없음
+                    "tokens": [],
+                    "char_length": 0,
+                    "token_count": 0,
+                    "date": review.get("date"),
+                    "collected_at": review.get("collected_at"),
+                    "nickname": review.get("nickname"),
+                    "has_image": review.get("has_image"),
+                    "helpful_count": review.get("helpful_count"),
+                    "word2vec": None,
+                }
+                review_details.append(review_detail)
+
         # 카테고리별 감성 키워드 분석
         category_sentiment = analyze_category_sentiment(
             with_text.get("data", []), top_n=30, min_doc_freq=20

@@ -249,6 +249,13 @@ def main():
             len(text_reviews) / total_reviews if total_reviews > 0 else 0.0
         )
 
+        # rating_distribution 계산 (1~5점 각각 몇 개인지)
+        rating_dist = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+        for r in product_reviews:
+            score = r.get("score")
+            if score in rating_dist:
+                rating_dist[score] += 1
+
         # top_keywords 추출 (긍정 키워드 상위 5개)
         sentiment = product.get("sentiment_analysis", {})
         pos_keywords = sentiment.get("positive_special", [])[:5]
@@ -260,24 +267,53 @@ def main():
         else:
             category = "기타"
 
+        # category_path에서 마지막 경로 추출
+        category_path_str = product.get("category_path", "")
+        path = category_path_str.split(" > ")[-1] if category_path_str else ""
+
         products_final.append(
             {
+                # 원본 product_info 필드
                 "product_id": product_id,
                 "product_name": product.get("product_name"),
                 "brand": product.get("brand"),
                 "category": category,
+                "category_path": category_path_str,
+                "path": path,
+                "price": product.get("price"),
+                "delivery_type": product.get("delivery_type"),
+                "product_url": product.get("product_url"),
+                # 전처리 추가 필드
                 "skin_type": product.get("skin_type", "미분류"),
                 "top_keywords": top_keywords,
-                "product_vector": product.get("product_vector"),
+                "sentiment_analysis": product.get("sentiment_analysis"),
+                "product_vector": product.get("product_vector")
+                or product.get("product_vector_word2vec"),
+                "representative_review_id": product.get("representative_review_id")
+                or product.get("representative_review_id_word2vec"),
+                "representative_similarity": product.get("representative_similarity")
+                or product.get("representative_similarity_word2vec"),
                 "recommend_score": product.get("recommend_score", 0.0),
+                # 통계 필드
                 "avg_rating_with_text": avg_rating_with_text,
                 "avg_rating_without_text": avg_rating_without_text,
                 "text_review_ratio": text_review_ratio,
                 "total_reviews": total_reviews,
+                "rating_1": rating_dist[1],
+                "rating_2": rating_dist[2],
+                "rating_3": rating_dist[3],
+                "rating_4": rating_dist[4],
+                "rating_5": rating_dist[5],
             }
         )
 
     df_products_final = pd.DataFrame(products_final)
+
+    # product_id로 정렬
+    df_products_final = df_products_final.sort_values("product_id").reset_index(
+        drop=True
+    )
+
     integrated_path = os.path.join(DATA_DIR, "integrated_products_final.parquet")
     df_products_final.to_parquet(
         integrated_path, engine="pyarrow", compression="snappy", index=False
@@ -287,6 +323,58 @@ def main():
     print(f"✓ 저장 완료: {integrated_path}")
     print(f"  - 상품 수: {len(df_products_final):,}개")
     print(f"  - 파일 크기: {product_size_mb:.2f} MB")
+
+    # 1-1. category_summary.parquet 생성 (카테고리별 전체 통계)
+    print("\n[1-1] category_summary.parquet 생성 중...")
+
+    category_stats = {}
+
+    # all_reviews를 순회하여 카테고리별 통계 집계
+    for review in all_reviews:
+        product_id = review.get("product_id")
+        if "_" in product_id:
+            category = "_".join(product_id.split("_")[:-1])
+        else:
+            category = "기타"
+
+        if category not in category_stats:
+            category_stats[category] = {
+                "category": category,
+                "total_reviews": 0,
+                "text_reviews": 0,
+                "no_text_reviews": 0,
+                "rating_1": 0,
+                "rating_2": 0,
+                "rating_3": 0,
+                "rating_4": 0,
+                "rating_5": 0,
+            }
+
+        stats = category_stats[category]
+        stats["total_reviews"] += 1
+
+        full_text = review.get("full_text", "")
+        if full_text and full_text.strip():
+            stats["text_reviews"] += 1
+        else:
+            stats["no_text_reviews"] += 1
+
+        score = review.get("score")
+        if score in [1, 2, 3, 4, 5]:
+            stats[f"rating_{score}"] += 1
+
+    df_category_summary = pd.DataFrame(list(category_stats.values()))
+    category_summary_path = os.path.join(DATA_DIR, "category_summary.parquet")
+    df_category_summary.to_parquet(
+        category_summary_path, engine="pyarrow", compression="snappy", index=False
+    )
+
+    print(f"✓ 저장 완료: {category_summary_path}")
+    print(f"  - 카테고리 수: {len(df_category_summary):,}개")
+    for _, row in df_category_summary.iterrows():
+        print(
+            f"  • {row['category']}: 전체 {row['total_reviews']:,}개 (텍스트 {row['text_reviews']:,}개, 없음 {row['no_text_reviews']:,}개)"
+        )
 
     # 2. detailed_stats/ 카테고리별 파티션 생성
     print("\n[2/3] detailed_stats 카테고리별 파티션 생성 중...")
