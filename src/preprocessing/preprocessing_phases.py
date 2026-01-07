@@ -322,14 +322,17 @@ def vectorize_file(args):
                 # 리뷰 벡터 생성
                 review_detail = {
                     "product_id": product_info.get("product_id"),
-                    "review_id": review.get("id"),
+                    "id": review.get("id"),
                     "full_text": full_text,
+                    "title": review.get("title", ""),
+                    "content": review.get("content", ""),
                     "score": score,
                     "label": label,
                     "tokens": tokens,
                     "char_length": saved_review["char_length"],
                     "token_count": saved_review["token_count"],
                     "date": review.get("date"),
+                    "collected_at": review.get("collected_at"),
                     "nickname": review.get("nickname"),
                     "has_image": review.get("has_image"),
                     "helpful_count": review.get("helpful_count"),

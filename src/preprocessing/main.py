@@ -375,13 +375,23 @@ def main():
         reviews_by_category.setdefault(category, []).append(
             {
                 "product_id": product_id,
+                "id": review.get("id"),
                 "full_text": full_text,
                 "title": review.get("title", ""),
+                "content": review.get("content", ""),
                 "has_text": has_text,
+                "score": review.get("score"),
                 "label": review.get("label"),
+                "tokens": review.get("tokens"),
+                "char_length": review.get("char_length"),
+                "token_count": review.get("token_count"),
+                "date": review.get("date"),
+                "collected_at": review.get("collected_at"),
+                "nickname": review.get("nickname"),
+                "has_image": review.get("has_image"),
+                "helpful_count": review.get("helpful_count"),
                 "sentiment_score": None,  # 나중에 모델 예측값 추가
                 "word2vec": review.get("word2vec"),
-                "rating": review.get("score"),
             }
         )
 
