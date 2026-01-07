@@ -33,148 +33,50 @@ else:  # Linux
     FONT_PATH = "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"
 
 DATA_DIR = os.path.join("data", "processed_data")
-PARQUET_PATH = os.path.join(
-    "data", "processed_data", "integrated_reviews_detail.parquet"
-)
+PRODUCTS_PARQUET = os.path.join(DATA_DIR, "integrated_products_final.parquet")
+CATEGORY_SUMMARY_PARQUET = os.path.join(DATA_DIR, "category_summary.parquet")
+REVIEWS_DIR = os.path.join(DATA_DIR, "partitioned_reviews")
 
 
-# 재귀적으로 모든 JSON 파일 읽기
-json_files = [str(p) for p in Path(DATA_DIR).rglob("*.json")]
+# Parquet 파일 로딩
+print(f"상품 데이터: {PRODUCTS_PARQUET}")
+print(f"카테고리 통계: {CATEGORY_SUMMARY_PARQUET}")
+print(f"리뷰 데이터: {REVIEWS_DIR}")
 
-print(f"총 JSON 파일 개수: {len(json_files)}")
-for jf in json_files[:5]:  # 처음 5개 파일 경로 출력
-    print(f"  - {jf}")
+# 상품 데이터 로딩
+df_product = pd.read_parquet(PRODUCTS_PARQUET)
 
+# 카테고리 통계 로딩
+df_category_summary = pd.read_parquet(CATEGORY_SUMMARY_PARQUET)
 
-# 상품 데이터
-product_rows = []
-total_rating_rows = []
+# 모든 리뷰 데이터 로딩
+review_files = sorted(Path(REVIEWS_DIR).glob("partitioned_reviews_category_*.parquet"))
+all_reviews_list = []
+for f in review_files:
+    df_r = pd.read_parquet(f)
+    all_reviews_list.append(df_r)
 
-for path in json_files:
-    with open(path, "r", encoding="utf-8") as f:
-        raw = json.load(f)
+if all_reviews_list:
+    df_review_all = pd.concat(all_reviews_list, ignore_index=True)
+else:
+    df_review_all = pd.DataFrame()
 
-    total_rating_dist = raw.get("total_rating_distribution")
-    if not total_rating_dist:
-        continue
+# 텍스트 있는 리뷰만 분리
+df_review = df_review_all[df_review_all["has_text"] == True].copy()
 
-    total_rating_rows.append(
-        {
-            "search_name": raw.get("search_name"),
-            "total_product": raw.get("total_product"),
-            "total_collected_reviews": raw.get("total_collected_reviews"),
-            "rating_5": total_rating_dist.get("5", 0),
-            "rating_4": total_rating_dist.get("4", 0),
-            "rating_3": total_rating_dist.get("3", 0),
-            "rating_2": total_rating_dist.get("2", 0),
-            "rating_1": total_rating_dist.get("1", 0),
-        }
-    )
+print("\n===== 데이터 로드 완료 =====")
+print(f"상품 수: {len(df_product)}")
+print(f"카테고리 수: {len(df_category_summary)}")
+print(f"전체 리뷰 수: {len(df_review_all)}")
+print(f"텍스트 리뷰 수: {len(df_review)}")
+print(f"\n상품 데이터 컬럼: {df_product.columns.tolist()[:10]}...")
+print(f"리뷰 데이터 컬럼: {df_review_all.columns.tolist()}")
 
-    for item in raw.get("data", []):
-        if "product_info" in item:
-            p_info = item.get("product_info", {})
-        else:
-            p_info = item
+print("\n===== 카테고리 통계 =====")
+print(df_category_summary)
 
-        product_rows.append(
-            {
-                "product_id": p_info.get("product_id"),
-                "product_name": p_info.get("product_name_clean")
-                or p_info.get("product_name"),
-                "brand": p_info.get("brand"),
-                "category": p_info.get("category_normal") or p_info.get("category"),
-                "total_reviews": p_info.get("total_reviews", 0),
-                # 상품별 평점 분포
-                "rating_5": p_info.get("rating_distribution", {}).get("5", 0),
-                "rating_4": p_info.get("rating_distribution", {}).get("4", 0),
-                "rating_3": p_info.get("rating_distribution", {}).get("3", 0),
-                "rating_2": p_info.get("rating_distribution", {}).get("2", 0),
-                "rating_1": p_info.get("rating_distribution", {}).get("1", 0),
-            }
-        )
-
-df_product = pd.DataFrame(product_rows).drop_duplicates(subset="product_id")
-df_total_rating = pd.DataFrame(total_rating_rows)
-
-print("\n===== json 데이터 컬럼 =====")
-print(df_product.columns)
-print("상품 수:", len(df_product))
-
-print("\n===== 전체 평점 분포 데이터프레임 =====")
-print(df_total_rating)
-
-
-# parquet 텍스트 리뷰
-df_review = pd.read_parquet(PARQUET_PATH)
-
-df_review["has_image"] = df_review["has_image"].fillna(0).astype(int)
-df_review["helpful_count"] = df_review["helpful_count"].fillna(0).astype(int)
-df_review["review_date"] = pd.to_datetime(df_review["date"], errors="coerce")
-df_review["label"] = df_review["label"].astype("Int64")
-df_review["tokens"] = df_review["tokens"].apply(
-    lambda x: ast.literal_eval(x) if isinstance(x, str) else x
-)
-df_review["source"] = "parquet"
-
-print("\n===== 텍스트 리뷰 데이터프레임 =====")
-print(df_review)
-print((df_review).info())
-
-
-# JSON 텍스트 없는 리뷰 추출
-json_review_rows = []
-
-for path in json_files:
-    with open(path, "r", encoding="utf-8") as f:
-        raw = json.load(f)
-
-    for item in raw.get("data", []):
-        if "product_info" not in item:
-            continue
-
-        product_id = item["product_info"].get("product_id")
-
-        for r in item.get("reviews", {}).get("data", []):
-            json_review_rows.append(
-                {
-                    "product_id": product_id,
-                    "review_id": r.get("id"),
-                    "score": r.get("score"),
-                    "review_date": pd.to_datetime(r.get("date"), errors="coerce"),
-                    "label": pd.NA,
-                    "has_image": 0,
-                    "helpful_count": 0,
-                    "source": "json",
-                }
-            )
-
-df_review_json = pd.DataFrame(json_review_rows)
-
-
-# 리뷰 단위 통합 데이터프레임
-df_review_parquet = df_review[
-    [
-        "product_id",
-        "review_id",
-        "score",
-        "review_date",
-        "label",
-        "has_image",
-        "helpful_count",
-        "source",
-    ]
-]
-
-df_review_all = pd.concat([df_review_parquet, df_review_json], ignore_index=True)
-
-print("\n===== 통합 리뷰 데이터 =====")
-print(df_review_all.info())
-print(df_review_all["source"].value_counts())
-
-
-# 기본 통계/분석
-product_score = (
+# 상품별 통계 계산
+product_stats = (
     df_review_all.groupby("product_id")
     .agg(
         mean_score=("score", "mean"),
@@ -184,7 +86,8 @@ product_score = (
     .reset_index()
 )
 
-print(product_score)
+print("\n===== 상품별 통계 (상위 10개) =====")
+print(product_stats.head(10))
 
 # 리뷰 많은 상품 TOP 6
 top_6_products = (
@@ -200,21 +103,30 @@ print("\n===== 리뷰 많은 상품 TOP 6 =====")
 print(top_6_products)
 
 
-# 리뷰 많은 상품 TOP 6
-# 상품별 월별 평점 분포 + 월별 리뷰 수 + 평균 평점
+# 리뷰 많은 상품 TOP 6 - 평점 분포 차트
+# (date 필드가 없으므로 월별이 아닌 전체 평점 분포만 표시)
 top_6_product_ids = top_6_products["product_id"].tolist()
 
-df_top6 = df_review_all[df_review_all["product_id"].isin(top_6_product_ids)].dropna(
-    subset=["review_date", "score"]
-)
+# 리뷰 많은 상품 TOP 6 - 월별 시계열 분석 차트
+top_6_product_ids = top_6_products["product_id"].tolist()
 
-df_top6["year_month"] = df_top6["review_date"].dt.to_period("M").astype(str)
+# date 컬럼을 datetime 객체로 변환하고 월 단위 주기 컬럼 생성
+df_top6 = df_review_all[df_review_all["product_id"].isin(top_6_product_ids)].copy()
+df_top6["date"] = pd.to_datetime(df_top6["date"], errors="coerce")
+df_top6 = df_top6.dropna(subset=["date", "score"])
+df_top6["year_month"] = df_top6["date"].dt.to_period("M").astype(str)
 
-fig = plt.figure(figsize=(18, 12))
+fig = plt.figure(figsize=(18, 15))
 gs = gridspec.GridSpec(3, 2, figure=fig)
+
+# 평점별 고정 색상 설정 (빨강~초록 계열)
+color_map = {1: "#d32f2f", 2: "#ff6f00", 3: "#fbc02d", 4: "#7cb342", 5: "#388e3c"}
 
 for i, pid in enumerate(top_6_product_ids):
     df_p = df_top6[df_top6["product_id"] == pid]
+
+    if len(df_p) == 0:
+        continue
 
     product_name = (
         df_product.loc[df_product["product_id"] == pid, "product_name"].values[0]
@@ -222,125 +134,261 @@ for i, pid in enumerate(top_6_product_ids):
         else pid
     )
 
-    # 월별 리뷰 수
-    monthly_count = df_p.groupby("year_month").size().rename("review_count")
-
-    # 월별 평균 평점
-    monthly_mean = df_p.groupby("year_month")["score"].mean().rename("mean_score")
-
-    # 월별 평점 분포
+    # 월별 평점 분포 데이터 집계 (unstack을 통해 막대용 행렬 생성)
     rating_dist = df_p.groupby(["year_month", "score"]).size().unstack(fill_value=0)
+    rating_dist = rating_dist.reindex(columns=[1, 2, 3, 4, 5], fill_value=0)
+
+    # 월별 평균 평점 계산
+    monthly_mean = df_p.groupby("year_month")["score"].mean()
 
     ax1 = fig.add_subplot(gs[i // 2, i % 2])
-    rating_dist.plot(kind="bar", stacked=True, ax=ax1)
-    ax1.set_title(f"{product_name}\n월별 평점 & 리뷰 수 분포", pad=20)
-    ax1.set_xlabel("월")
-    ax1.set_ylabel("리뷰 수")
 
-    x_labels = rating_dist.index.tolist()
-    new_labels = []
-    prev_year = None
-    for idx, ym in enumerate(x_labels):
-        year, month = ym.split("-")
-        if idx % 2 == 0:  # 2달마다 표시
-            if year != prev_year:  # 연도가 바뀌면 연도 포함
-                new_labels.append(f"{year}-{month}")
-                prev_year = year
-            else:
-                new_labels.append(month)
-        else:
-            new_labels.append("")
-    ax1.set_xticklabels(new_labels, rotation=45, ha="right")
+    # Y1: 누적 막대 그래프 (평점 분포)
+    rating_dist.plot(
+        kind="bar",
+        stacked=True,
+        ax=ax1,
+        color=[color_map[c] for c in rating_dist.columns],
+        alpha=0.8,
+    )
+    ax1.set_title(f"{product_name[:40]}...\n월별 평점 분포 및 추이", pad=20)
+    ax1.set_xlabel("조회 월")
+    ax1.set_ylabel("리뷰 수 (막대)")
+    ax1.legend(title="평점", loc="upper left", ncol=5, fontsize=8)
 
-    # # 평균 평점 텍스트 표시
-    # for x, (ym, mean) in enumerate(monthly_mean.items()):
-    #     y_pos = rating_dist.loc[ym].sum() * 0.95
-    #     ax1.text(x, y_pos, f"★ {mean:.2f}", ha="center", fontsize=9)
+    # x축 레이블 최적화 (데이터가 많을 경우 간격 조절)
+    xticks = ax1.get_xticks()
+    if len(rating_dist.index) > 10:
+        ax1.set_xticks(xticks[::2])
+        ax1.set_xticklabels(rating_dist.index[::2], rotation=45, ha="right")
+    else:
+        ax1.set_xticklabels(rating_dist.index, rotation=45, ha="right")
 
+    # Y2: 이중축 선 그래프 (평균 평점)
     ax2 = ax1.twinx()
-    monthly_mean.plot(color='blue', linewidth=1, label="월별 평균 평점", ax=ax2)
-    ax2.set_ylabel("평균 평점")
-    ax2.set_ylim(1, 5)
-    ax2.legend(loc="upper right")
-
-    x_labels2 = monthly_mean.index.tolist()
-    new_labels2 = []
-    prev_year2 = None
-    for idx, ym in enumerate(x_labels2):
-        year, month = ym.split("-")
-        if idx % 2 == 0:  # 2달마다 표시
-            if year != prev_year2:  # 연도가 바뀌면 연도 포함
-                new_labels2.append(f"{year}-{month}")
-                prev_year2 = year
-            else:
-                new_labels2.append(month)
-        else:
-            new_labels2.append("")
-    ax2.set_xticks(range(len(new_labels2)))  # tick 위치 먼저 설정
-    ax2.set_xticklabels(new_labels2, rotation=45, ha="right")
+    monthly_mean.plot(
+        kind="line",
+        ax=ax2,
+        color="blue",
+        marker="o",
+        markersize=4,
+        linewidth=2,
+        label="평균 평점",
+    )
+    ax2.set_ylabel("평균 평점 (선)")
+    ax2.set_ylim(1, 5.2)  # 평점 범위 고정
+    ax2.legend(loc="upper right", fontsize=9)
 
 plt.tight_layout()
 plt.show()
 
 
-# ===== 시각화 1 =====
-fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+# ===== 시각화 1 (6개 차트) =====
+fig, axes = plt.subplots(2, 3, figsize=(18, 10))
 
-rating_sum = df_total_rating.loc[0, ["rating_1", "rating_2", "rating_3", "rating_4", "rating_5"]]
+# 1. 전체 상품 평점 분포 (상단 왼쪽 - Horizontal Bar)
+rating_sum = df_category_summary[
+    ["rating_1", "rating_2", "rating_3", "rating_4", "rating_5"]
+].sum()
 rating_sum.index = ["1점", "2점", "3점", "4점", "5점"]
 rating_sum.plot(kind="barh", ax=axes[0, 0], color=sns.color_palette("YlOrRd", 5))
 axes[0, 0].set_title("전체 상품 평점 분포", weight="bold")
-axes[0, 0].set_ylabel("리뷰 수")
-axes[0, 0].grid(axis="y", alpha=0.3)
+axes[0, 0].set_ylabel("평점")
+axes[0, 0].set_xlabel("리뷰 수")
+axes[0, 0].grid(axis="x", alpha=0.3)
 
-axes[0, 1].hist(df_review["char_length"], bins=50, color="pink")
-axes[0, 1].set_title("리뷰 길이 분포", weight="bold")
-axes[0, 1].set_xlim(0, 2000)
+# 2. 리뷰 길이 분포 (상단 가운데 - Histogram)
+if "char_length" in df_review.columns:
+    axes[0, 1].hist(
+        df_review["char_length"], bins=50, color="pink", edgecolor="grey", alpha=0.7
+    )
+    axes[0, 1].set_title("리뷰 길이 분포", weight="bold")
+    axes[0, 1].set_xlim(0, 2000)
+    axes[0, 1].set_xlabel("리뷰 길이")
+    axes[0, 1].set_ylabel("빈도")
 
-axes[0, 2].scatter(df_review["char_length"], df_review["helpful_count"], alpha=0.3, s=10, color="green")
+# 3. 리뷰 길이 & Helpful_count (상단 오른쪽 - Scatter with log scale)
+axes[0, 2].scatter(
+    df_review.get("char_length", [0] * len(df_review)),
+    df_review.get("helpful_count", [0] * len(df_review)),
+    alpha=0.3,
+    s=10,
+    color="green",
+)
 axes[0, 2].set_xscale("log")
 axes[0, 2].set_yscale("log")
 axes[0, 2].set_title("리뷰 길이 & Helpful_count", weight="bold")
-axes[0, 2].set_xlabel("리뷰 길이")
-axes[0, 2].set_ylabel("Helpful_count")
+axes[0, 2].set_xlabel("리뷰 길이 (log)")
+axes[0, 2].set_ylabel("Helpful_count (log)")
 
-sns.violinplot(x="score", y="char_length", data=df_review, palette="Set2", ax=axes[1, 0])
-axes[1, 0].set_title("평점별 리뷰 길이", weight="bold")
-axes[1, 0].set_xlabel("평점")
-axes[1, 0].set_ylabel("리뷰 길이")
-axes[1, 0].set_ylim(0, 1500)
+# 4. 평점별 리뷰 길이 (하단 왼쪽 - Violin Plot)
+if not df_review.empty and "char_length" in df_review.columns:
+    sns.violinplot(
+        x="score", y="char_length", data=df_review, palette="Set2", ax=axes[1, 0]
+    )
+    axes[1, 0].set_title("평점별 리뷰 길이", weight="bold")
+    axes[1, 0].set_xlabel("평점")
+    axes[1, 0].set_ylabel("리뷰 길이")
+    axes[1, 0].set_ylim(0, 1500)
 
-sns.boxplot(x="score", y="helpful_count", data=df_review, palette="Pastel1", ax=axes[1, 1])
-axes[1, 1].set_yscale("log")
-axes[1, 1].set_title("평점별 helpful_count", weight="bold")
-axes[1, 1].set_xlabel("평점")
-axes[1, 1].set_ylabel("Helpful_count")
+# 5. 평점별 helpful_count (하단 가운데 - Box Plot with log scale)
+if not df_review_all.empty:
+    sns.boxplot(
+        x="score",
+        y="helpful_count",
+        data=df_review_all,
+        palette="Pastel1",
+        ax=axes[1, 1],
+    )
+    axes[1, 1].set_yscale("log")
+    axes[1, 1].set_title("평점별 helpful_count", weight="bold")
+    axes[1, 1].set_xlabel("평점")
+    axes[1, 1].set_ylabel("Helpful_count (log)")
 
-axes[1, 2].scatter(
-    product_score["mean_score"],
-    product_score["mean_helpful"],
-    s=60,
-    alpha=0.7,
-    color="skyblue",
-    edgecolor="blue",
-)
-axes[1, 2].set_title("상품 평균 평점 & Helpful_count", weight="bold")
-axes[1, 2].set_xlabel("상품 평균 평점")
-axes[1, 2].set_ylabel("Helpful_count")
+# 6. 상품 평균 평점 & Helpful_count (하단 오른쪽 - Scatter)
+if not product_stats.empty:
+    axes[1, 2].scatter(
+        product_stats["mean_score"],
+        product_stats["mean_helpful"],
+        s=60,
+        alpha=0.7,
+        color="skyblue",
+        edgecolor="blue",
+    )
+    axes[1, 2].set_title("상품 평균 평점 & Helpful_count", weight="bold")
+    axes[1, 2].set_xlabel("상품 평균 평점")
+    axes[1, 2].set_ylabel("평균 Helpful_count")
 
 plt.tight_layout()
 plt.show()
 
 
-df_product["product_name_short"] = (df_product["product_name"]).str.slice(0, 30)  # 상품명 30자 까지만
+# ===== 시각화 2 (추가 차트) =====
+fig, axes = plt.subplots(2, 3, figsize=(18, 10))
 
-# ===== 시각화 2 =====
+# 첫 번째 줄 - 카테고리별 평점 분포, 상품별 리뷰 수 분포
+category_ratings = []
+for _, row in df_category_summary.iterrows():
+    category_ratings.append(
+        {
+            "category": row["category"],
+            "1점": row["rating_1"],
+            "2점": row["rating_2"],
+            "3점": row["rating_3"],
+            "4점": row["rating_4"],
+            "5점": row["rating_5"],
+        }
+    )
+
+df_cat_ratings = pd.DataFrame(category_ratings).set_index("category")
+df_cat_ratings.plot(
+    kind="barh", stacked=True, ax=axes[0, 0], color=sns.color_palette("YlOrRd", 5)
+)
+axes[0, 0].set_title("카테고리별 평점 분포", weight="bold")
+axes[0, 0].set_ylabel("카테고리")
+axes[0, 0].set_xlabel("리뷰 수")
+axes[0, 0].grid(axis="x", alpha=0.3)
+
+# 상품별 리뷰 수 분포
+axes[0, 1].hist(df_product["total_reviews"], bins=30, color="purple")
+axes[0, 1].set_title("상품별 리뷰 수 분포", weight="bold")
+axes[0, 1].set_xlabel("리뷰 수")
+axes[0, 1].set_ylabel("상품 수")
+
+# 빈 차트 제거
+fig.delaxes(axes[0, 2])
+
+# 두 번째 줄 - 카테고리별 텍스트 유무, 카테고리별 평균 평점, 평균 평점 분포
+# 1. 카테고리별 텍스트 유무
+text_stats = df_category_summary[
+    ["category", "text_reviews", "no_text_reviews"]
+].set_index("category")
+text_stats.plot(kind="bar", stacked=True, ax=axes[1, 0])
+axes[1, 0].set_title("카테고리별 텍스트 유무", weight="bold")
+axes[1, 0].set_xlabel("카테고리")
+axes[1, 0].set_ylabel("리뷰 수")
+axes[1, 0].tick_params(axis="x", rotation=15)
+
+# 2. 카테고리별 평균 평점 (텍스트 유무별)
+category_avg_ratings = []
+for category in df_category_summary["category"]:
+    cat_products = df_product[df_product["category"] == category]
+
+    # 텍스트 있는 리뷰의 평균 평점 (가중 평균)
+    total_text_reviews = (
+        cat_products["total_reviews"] * cat_products["text_review_ratio"] / 100
+    )
+    weighted_text_rating = (
+        (cat_products["avg_rating_with_text"] * total_text_reviews).sum()
+        / total_text_reviews.sum()
+        if total_text_reviews.sum() > 0
+        else 0
+    )
+
+    # 텍스트 없는 리뷰의 평균 평점 (가중 평균)
+    total_no_text_reviews = (
+        cat_products["total_reviews"] * (100 - cat_products["text_review_ratio"]) / 100
+    )
+    weighted_no_text_rating = (
+        (cat_products["avg_rating_without_text"] * total_no_text_reviews).sum()
+        / total_no_text_reviews.sum()
+        if total_no_text_reviews.sum() > 0
+        else 0
+    )
+
+    category_avg_ratings.append(
+        {
+            "category": category,
+            "텍스트 있음": weighted_text_rating,
+            "텍스트 없음": weighted_no_text_rating,
+        }
+    )
+
+df_cat_avg = pd.DataFrame(category_avg_ratings).set_index("category")
+df_cat_avg.plot(kind="bar", ax=axes[1, 1], color=["blue", "red"], alpha=0.7)
+axes[1, 1].set_title("카테고리별 평균 평점 (텍스트 유무별)", weight="bold")
+axes[1, 1].set_xlabel("카테고리")
+axes[1, 1].set_ylabel("평균 평점")
+axes[1, 1].set_ylim([0, 5])
+axes[1, 1].tick_params(axis="x", rotation=15)
+axes[1, 1].axhline(y=3, color="gray", linestyle="--", alpha=0.5)
+axes[1, 1].legend()
+
+# 3. 평균 평점 분포 (텍스트 유무별)
+axes[1, 2].hist(
+    df_product["avg_rating_with_text"],
+    bins=20,
+    alpha=0.7,
+    label="텍스트 있음",
+    color="blue",
+)
+axes[1, 2].hist(
+    df_product["avg_rating_without_text"],
+    bins=20,
+    alpha=0.7,
+    label="텍스트 없음",
+    color="red",
+)
+axes[1, 2].set_title("평균 평점 분포 (텍스트 유무별)", weight="bold")
+axes[1, 2].set_xlabel("평균 평점")
+axes[1, 2].set_ylabel("상품 수")
+axes[1, 2].legend()
+
+plt.tight_layout()
+plt.show()
+
+
+# ===== 시각화 3 (추가 분석) =====
+df_product["product_name_short"] = df_product["product_name"].str.slice(
+    0, 30
+)  # 상품명 30자로 제한
+
 fig = plt.figure(figsize=(15, 8))
 gs = gridspec.GridSpec(2, 2, width_ratios=[1.2, 2.3])
 
 rating_cols = ["rating_1", "rating_2", "rating_3", "rating_4", "rating_5"]
 
-# 상품별 평균 평점
+# 1. TOP 10 상품 평균 평점
 ax1 = fig.add_subplot(gs[0, 0])
 df_product["avg_rating"] = (
     df_product["rating_1"] * 1
@@ -359,27 +407,27 @@ top10 = (
 top10.set_index("product_name_short")["avg_rating"].plot(
     kind="barh", color="slateblue", ax=ax1
 )
-
-# print(top10[rating_cols].head(10))
-
 ax1.set_title("TOP 10 상품 평균 평점", weight="bold")
 ax1.set_xlim(4.5, 5)
 ax1.invert_yaxis()
 
+# 2. 상품별 평점 분포 히트맵
+ax2 = fig.add_subplot(gs[0, 1])
 
-# 평점 & 상품 히트맵
 # 상품명 merge
-df_review_all = df_review_all.merge(
-    df_product[["product_id", "product_name_short"]],
-    on="product_id",
-    how="left"
+df_review_all_with_name = df_review_all.merge(
+    df_product[["product_id", "product_name_short"]], on="product_id", how="left"
 )
 
-rating_dist = df_review_all.groupby(["product_name_short", "score"]).size().unstack(fill_value=0)   # 상품별 평점 분포
-rating_dist = rating_dist.loc[rating_dist.sum(axis=1).sort_values(ascending=False).head(10).index]  # 상위 10개 상품 필터링
-rating_dist.columns = rating_dist.columns.astype(str)   # 컬럼이 숫자형이면 문자열로 변환해서 정렬
-
-ax2 = fig.add_subplot(gs[0, 1])
+rating_dist = (
+    df_review_all_with_name.groupby(["product_name_short", "score"])
+    .size()
+    .unstack(fill_value=0)
+)
+rating_dist = rating_dist.loc[
+    rating_dist.sum(axis=1).sort_values(ascending=False).head(10).index
+]
+rating_dist.columns = rating_dist.columns.astype(str)
 
 sns.heatmap(
     rating_dist,
@@ -392,20 +440,19 @@ sns.heatmap(
     cbar=True,
     ax=ax2,
 )
-
 ax2.set_title("상품별 평점 분포 히트맵", weight="bold")
 ax2.set_aspect("auto")
 ax2.set_xticklabels(ax2.get_xticklabels(), fontsize=10)
 ax2.set_yticklabels(ax2.get_yticklabels(), fontsize=9)
 
-
-# 월별 평균 판매량
+# 3. 월별 평균 판매량 추이
 ax3 = fig.add_subplot(gs[1, :])
 
+df_review_all["review_date"] = pd.to_datetime(df_review_all["date"], errors="coerce")
 monthly_review_cnt = (
     df_review_all.dropna(subset=["review_date"])
     .set_index("review_date")
-    .resample("ME")["review_id"]
+    .resample("ME")["id"]
     .count()
 )
 monthly_review_cnt.plot(ax=ax3, linewidth=2, color="salmon")
@@ -422,17 +469,14 @@ def normalize_tokens(x):
     # list
     if isinstance(x, list):
         return x
-
     # numpy array
     if isinstance(x, np.ndarray):
         return x.tolist()
-
     # 문자열
     if isinstance(x, str):
         # 단어 추출
         tokens = re.findall(r"'([^']+)'", x)
         return tokens
-
     return []
 
 
@@ -442,15 +486,13 @@ df_wc = df_review[
     (df_review["label"].isin([0, 1])) & (df_review["tokens"].apply(len) > 0)
 ]
 
-# print(df_wc["label"].value_counts())
-
 pos_tokens = list(chain.from_iterable(df_wc[df_wc["label"] == 1]["tokens"]))
 neg_tokens = list(chain.from_iterable(df_wc[df_wc["label"] == 0]["tokens"]))
 
-print("긍정 리뷰 수:", (df_wc["label"] == 1).sum())
-print("부정 리뷰 수:", (df_wc["label"] == 0).sum())
-print("긍정 토큰 수:", len(pos_tokens))
-print("부정 토큰 수:", len(neg_tokens))
+print(f"\n긍정 리뷰 수: {(df_wc['label'] == 1).sum()}")
+print(f"부정 리뷰 수: {(df_wc['label'] == 0).sum()}")
+print(f"긍정 토큰 수: {len(pos_tokens)}")
+print(f"부정 토큰 수: {len(neg_tokens)}")
 
 
 def wc_color(palette):
@@ -464,9 +506,8 @@ def wc_color(palette):
 def wc(tokens, palette):
     if not tokens:
         return None
-
     text = " ".join(tokens)
-    wc = WordCloud(
+    wc_obj = WordCloud(
         font_path=FONT_PATH,
         background_color="white",
         width=800,
@@ -474,8 +515,7 @@ def wc(tokens, palette):
         max_words=100,
         color_func=wc_color(palette),
     ).generate(text)
-
-    return wc
+    return wc_obj
 
 
 wc_pos = wc(pos_tokens, sns.color_palette("OrRd", 10))
@@ -485,13 +525,17 @@ fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
 if wc_pos is not None:
     axes[0].imshow(wc_pos)
-axes[0].set_title("긍정 리뷰 워드클라우드")
+axes[0].set_title("긍정 리뷰 워드클라우드", weight="bold")
 axes[0].axis("off")
 
 if wc_neg is not None:
     axes[1].imshow(wc_neg)
-axes[1].set_title("부정 리뷰 워드클라우드")
+axes[1].set_title("부정 리뷰 워드클라우드", weight="bold")
 axes[1].axis("off")
 
 plt.tight_layout()
 plt.show()
+
+
+print("\n===== EDA 완료 =====")
+print(f"총 {len(df_product)}개 상품, {len(df_review_all)}개 리뷰 분석 완료")
