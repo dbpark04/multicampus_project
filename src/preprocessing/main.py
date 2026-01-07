@@ -309,10 +309,25 @@ def main():
 
     df_products_final = pd.DataFrame(products_final)
 
-    # product_id로 정렬
-    df_products_final = df_products_final.sort_values("product_id").reset_index(
+    # product_id로 정렬 (카테고리_숫자 형식에서 숫자 기준으로 정렬)
+    def extract_numeric_sort_key(product_id):
+        """product_id에서 카테고리와 숫자를 분리하여 정렬 키 생성"""
+        parts = product_id.rsplit("_", 1)  # 마지막 언더스코어 기준으로 분리
+        if len(parts) == 2:
+            category, num_str = parts
+            try:
+                return (category, int(num_str))  # 카테고리명, 숫자(정수)로 반환
+            except ValueError:
+                return (category, 0)  # 숫자 변환 실패 시 0으로 처리
+        return (product_id, 0)  # 언더스코어가 없으면 원본 그대로
+
+    df_products_final["_sort_key"] = df_products_final["product_id"].apply(
+        extract_numeric_sort_key
+    )
+    df_products_final = df_products_final.sort_values("_sort_key").reset_index(
         drop=True
     )
+    df_products_final = df_products_final.drop(columns=["_sort_key"])  # 임시 컬럼 제거
 
     integrated_path = os.path.join(DATA_DIR, "integrated_products_final.parquet")
     df_products_final.to_parquet(
