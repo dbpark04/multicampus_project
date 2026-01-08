@@ -1,525 +1,284 @@
-from __future__ import annotations
+"""
+전처리 후 Parquet 파일 기반 기본 통계 분석
+- integrated_products_final.parquet
+- category_summary.parquet
+- partitioned_reviews_category_*.parquet
+- JSON 형태로 data/ 에 저장 (old 파일 형식 준수)
+"""
 
 import json
-from dataclasses import dataclass
+import pandas as pd
 from pathlib import Path
 from collections import Counter, defaultdict
-from typing import Any, Dict, Generator, List, Tuple, Optional
+from typing import Dict, Any, List
 
-import numpy as np
-import pandas as pd
-
-
-# ==============================
-# 기본 통계 산출 설정, 자료구조 정의
-# ==============================
+DATA_DIR = Path("data/processed_data")
+PRODUCTS_FILE = DATA_DIR / "integrated_products_final.parquet"
+CATEGORY_SUMMARY_FILE = DATA_DIR / "category_summary.parquet"
+REVIEWS_DIR = DATA_DIR / "partitioned_reviews"
+OUTPUT_JSON = Path("data") / "basic_stats_summary.json"
 
 
-@dataclass(frozen=True)
-class BasicStatsConfig:
-    """
-    기본 통계량 산출 설정
-    - file_suffix: 통계를 낼 파일 패턴
-    - review_cnt_bins: 상품별 리뷰 수 분포를 만들 때 bin 경계
-    - valid_scores: 유효 별점 범위
-    - save_outputs: 결과 DF 저장 여부
-    - output_dirname: 저장 폴더명(processed_root 하위)
-    - save_format: 저장 포맷("parquet" or "csv")
-    """
+def load_all_data():
+    """모든 Parquet 파일 로드"""
+    print("=" * 60)
+    print("데이터 로딩 중...")
+    print("=" * 60)
 
-    file_suffix: str = "auto"
-    review_cnt_bins: Tuple[int, ...] = (1, 2, 3, 5, 10, 20, 50, 100, 200, 500, 1000)
-    valid_scores: Tuple[int, ...] = (1, 2, 3, 4, 5)
+    # 상품 데이터
+    df_products = pd.read_parquet(PRODUCTS_FILE)
+    print(f"✓ 상품 데이터: {len(df_products):,}개")
 
-    save_outputs: bool = False
-    output_dirname: str = "eda_outputs"
-    save_format: str = "parquet"  # "parquet" or "csv"
+    # 카테고리 통계
+    df_category = pd.read_parquet(CATEGORY_SUMMARY_FILE)
+    print(f"✓ 카테고리: {len(df_category):,}개")
 
-    # JSON 1개로 묶어 저장 옵션(기본 True)
-    save_summary_json: bool = True
-    summary_json_name: str = "basic_stats_summary.json"
+    # 리뷰 데이터 (모든 카테고리)
+    review_files = sorted(REVIEWS_DIR.glob("partitioned_reviews_category_*.parquet"))
+    all_reviews = []
+    for f in review_files:
+        df_r = pd.read_parquet(f)
+        all_reviews.append(df_r)
+        print(f"  - {f.name}: {len(df_r):,}개 리뷰")
+
+    df_reviews = (
+        pd.concat(all_reviews, ignore_index=True) if all_reviews else pd.DataFrame()
+    )
+    print(f"✓ 전체 리뷰: {len(df_reviews):,}개")
+
+    return df_products, df_category, df_reviews
 
 
-def init_review_stat_counters() -> Dict[str, Any]:
-    """
-    기본 통계 계산을 위한 누적 카운터/셋 자료구조 초기화
-    """
-    return {
-        "category_products": defaultdict(set),  # category -> set(product_id)
-        "product_review_cnt": defaultdict(int),  # product_id -> collected review count
-        "score_cnt": Counter(),  # score -> count
-        "category_score_cnt": defaultdict(int),  # (category, score) -> count
+def analyze_basic_stats(df_products, df_category, df_reviews) -> Dict[str, Any]:
+    """기본 통계 분석 및 JSON 저장용 데이터 생성"""
+    print("\n" + "=" * 60)
+    print("기본 통계 분석")
+    print("=" * 60)
+
+    stats_result = {}
+
+    # 메타 정보
+    meta = {
+        "total_products_seen": len(df_products),
+        "total_reviews_collected": int(df_products["total_reviews"].sum()),
+        "n_categories": len(df_category),
+        "n_files": len(list(REVIEWS_DIR.glob("*.parquet"))),
     }
 
+    # 1. 상품 통계
+    print("\n[1] 상품 통계")
+    print(f"  - 총 상품 수: {len(df_products):,}개")
+    print(f"  - 평균 리뷰 수: {df_products['total_reviews'].mean():.1f}개")
+    print(f"  - 최대 리뷰 수: {df_products['total_reviews'].max():,}개")
+    print(f"  - 평균 평점(텍스트): {df_products['avg_rating_with_text'].mean():.2f}")
+    print(
+        f"  - 평균 평점(비텍스트): {df_products['avg_rating_without_text'].mean():.2f}"
+    )
+    print(f"  - 평균 텍스트 비율: {df_products['text_review_ratio'].mean():.1%}")
 
-# =========================
-# int 변환, 카테고리 추출 규칙
-# =========================
-
-
-def to_int_safe(x) -> Optional[int]:
-    """문자열/None 등 안전하게 int 변환. 실패 시 None."""
-    try:
-        return int(x)
-    except Exception:
-        return None
-
-
-def extract_category(product_info: Dict[str, Any]) -> str:
-    """
-    상품 정보에서 카테고리 추출 규칙
-    우선순위:
-      1) category_norm
-      2) category_path 마지막 토큰(> 기준)
-      3) UNKNOWN
-    """
-    cat = product_info.get("category_norm") or product_info.get("category_normal")
-    if cat:
-        return str(cat)
-
-    path = product_info.get("category_path")
-    if path and isinstance(path, str):
-        return path.split(">")[-1].strip()
-
-    return "UNKNOWN"
-
-
-# ====================================
-# 수집 완료된 리뷰 JSON 데이터 로드
-# ====================================
-
-
-def find_review_json_files(processed_root: str | Path, suffix: str) -> List[Path]:
-    """
-    processed_root 아래에서 suffix로 끝나는 json 파일 전체 수집.
-    """
-    root = Path(processed_root)
-    return sorted(root.rglob(f"*{suffix}"))
-
-
-# *_with_text.json 과 *_without_text.json 파일을 모두 수집하여 통합 분석
-def resolve_input_files(
-    processed_root: str | Path, cfg: BasicStatsConfig
-) -> List[Path]:
-    root = Path(processed_root)
-
-    if isinstance(cfg.file_suffix, str) and cfg.file_suffix.upper() == "AUTO":
-        with_files = sorted(root.rglob("*_with_text.json"))
-        # AUTO: with_text 우선 사용(중복 집계 방지). 없으면 without_text 사용
-        if with_files:
-            return with_files
-        return sorted(root.rglob("*_without_text.json"))
-
-    return find_review_json_files(root, cfg.file_suffix)
-
-
-def load_review_json(path: str | Path) -> Dict[str, Any]:
-    """
-    파일 최상단이 dict(요약 + data 리스트)이므로 json.load 사용.
-    """
-    p = Path(path)
-    with open(p, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-# ==========================================================
-# 중첩 JSON에서 상품 단위로 (상품정보, 리뷰리스트)를 순차적으로 반환
-# ==========================================================
-
-
-def iter_products_with_reviews(
-    review_obj: Dict[str, Any],
-) -> Generator[Tuple[Dict[str, Any], List[Dict[str, Any]]], None, None]:
-    """
-    '상품 단위'로 순회:
-      yield (product_info, reviews_list)
-
-    review_obj 형태:
-      {
-        ...,
-        "data": [
-          {
-            "product_info": {...},
-            "reviews": {"data":[{...}, ...]}
-          },
-          ...
-        ]
-      }
-    """
-    data_list = review_obj.get("data", [])
-    if not isinstance(data_list, list):
-        return
-
-    for item in data_list:
-        # item["product_info"]를 product_info 로 대체
-        product_info = item.get("product_info") or item or {}
-
-        yield product_info, []
-
-
-# 상품과 리뷰의 기본 통계 계산
-# =========================
-
-
-def update_basic_stat_counters(
-    counters: Dict[str, Any],
-    product_info: Dict[str, Any],
-    reviews_list: List[Dict[str, Any]],  # <- 인터페이스 유지(사용은 안 함)
-    cfg: BasicStatsConfig,
-    meta: Counter,
-) -> None:
-    """
-    상품 1개 단위로 기본 통계 누적 업데이트 (메타데이터 기반)
-    - reviews_list 순회하지 않음
-    - product_info의 total_reviews, rating_distribution만 사용
-    """
-    pid = product_info.get("product_id")
-
-    # 다른 키 후보도 허용
-    if not pid:
-        pid = (
-            product_info.get("id")
-            or product_info.get("productId")
-            or product_info.get("product_no")
+    # 2. 카테고리별 통계
+    print("\n[2] 카테고리별 통계")
+    category_stats = []
+    for _, row in df_category.iterrows():
+        print(f"\n  [{row['category']}]")
+        print(f"    - 전체 리뷰: {row['total_reviews']:,}개")
+        print(
+            f"    - 텍스트 리뷰: {row['text_reviews']:,}개 ({row['text_reviews']/row['total_reviews']*100:.1f}%)"
+        )
+        print(f"    - 비텍스트 리뷰: {row['no_text_reviews']:,}개")
+        print(
+            f"    - 평점 분포: 5점({row['rating_5']:,}) 4점({row['rating_4']:,}) 3점({row['rating_3']:,}) 2점({row['rating_2']:,}) 1점({row['rating_1']:,})"
         )
 
-    if not pid:
-        meta["missing_product_id"] += 1
-        return
-
-    pid = str(pid)
-    category = extract_category(product_info)
-
-    # 1) 카테고리별 distinct 상품 수
-    counters["category_products"][category].add(pid)
-
-    meta["total_products_seen"] += 1
-
-    # 2) 상품별 리뷰 수: total_reviews 우선, 없으면 rating_distribution 합, 없으면 0
-    total_reviews = to_int_safe(product_info.get("total_reviews"))
-
-    rating_dist = product_info.get("rating_distribution")
-    if isinstance(rating_dist, dict) and rating_dist:
-        # rating_distribution 키가 "5","4" 문자열일 수 있음
-        dist_sum = 0
-        for k, v in rating_dist.items():
-            s = to_int_safe(k)
-            cnt = to_int_safe(v) or 0
-            if s is None or s not in cfg.valid_scores:
-                meta["invalid_score"] += 1
-                continue
-
-            dist_sum += cnt
-            counters["score_cnt"][s] += cnt
-            counters["category_score_cnt"][(category, s)] += cnt
-
-        # total_reviews(메타데이터)와 rating_distribution 합이 불일치한 상품 카운트
-        if total_reviews is not None and total_reviews != dist_sum:
-            meta["review_cnt_mismatch"] += 1
-
-        # total_reviews가 없으면 dist_sum으로 대체
-        if total_reviews is None:
-            total_reviews = dist_sum
-    else:
-        meta["missing_rating_distribution"] += 1
-
-    if total_reviews is None:
-        total_reviews = 0
-
-    counters["product_review_cnt"][pid] += int(total_reviews)
-    meta["total_reviews_collected"] += int(total_reviews)
-
-
-# =======================================
-# 누적된 통계 결과 표로 정리, 파생 테이블 생성
-# =======================================
-
-
-def build_category_product_table(category_products: Dict[str, set]) -> pd.DataFrame:
-    """카테고리별 distinct 상품 수 테이블."""
-    if not category_products:
-        return pd.DataFrame(columns=["category", "product_cnt"])
-
-    return (
-        pd.DataFrame(
-            [
-                {"category": k, "product_cnt": len(v)}
-                for k, v in category_products.items()
-            ]
+        category_stats.append(
+            {
+                "category": row["category"],
+                "total_reviews": int(row["total_reviews"]),
+                "text_reviews": int(row["text_reviews"]),
+                "no_text_reviews": int(row["no_text_reviews"]),
+                "rating_5": int(row["rating_5"]),
+                "rating_4": int(row["rating_4"]),
+                "rating_3": int(row["rating_3"]),
+                "rating_2": int(row["rating_2"]),
+                "rating_1": int(row["rating_1"]),
+            }
         )
-        .sort_values("product_cnt", ascending=False)
-        .reset_index(drop=True)
+
+    # 3. 리뷰 통계
+    print("\n[3] 리뷰 통계")
+    print(f"  - 전체 리뷰 수: {len(df_reviews):,}개")
+    print(
+        f"  - 텍스트 리뷰: {df_reviews['has_text'].sum():,}개 ({df_reviews['has_text'].sum()/len(df_reviews)*100:.1f}%)"
+    )
+    print(f"  - 평균 평점: {df_reviews['score'].mean():.2f}")
+
+    # 평점 분포
+    score_dist = df_reviews["score"].value_counts().sort_index()
+    print("\n  평점 분포:")
+    score_count_list = []
+    for score, count in score_dist.items():
+        print(f"    {score}점: {count:,}개 ({count/len(df_reviews)*100:.1f}%)")
+        score_count_list.append({"score": int(score), "cnt": int(count)})
+
+    # 4. 브랜드 통계
+    print("\n[4] 상위 브랜드 (리뷰 수 기준)")
+    brand_reviews = (
+        df_products.groupby("brand")["total_reviews"]
+        .sum()
+        .sort_values(ascending=False)
+        .head(10)
+    )
+    brand_stats = []
+    for brand, count in brand_reviews.items():
+        print(f"  - {brand}: {count:,}개")
+        brand_stats.append({"brand": brand, "total_reviews": int(count)})
+
+    # 5. 카테고리별 상품 수
+    category_product_counts = (
+        df_products.groupby("category").size().reset_index(name="product_cnt")
+    )
+    category_product_counts = category_product_counts.sort_values(
+        "product_cnt", ascending=False
     )
 
-
-def build_product_review_table(product_review_cnt: Dict[str, int]) -> pd.DataFrame:
-    """상품별 수집 리뷰 수 테이블."""
-    if not product_review_cnt:
-        return pd.DataFrame(columns=["product_id", "review_cnt"])
-
-    return (
-        pd.DataFrame(
-            [{"product_id": k, "review_cnt": v} for k, v in product_review_cnt.items()]
-        )
-        .sort_values("review_cnt", ascending=False)
-        .reset_index(drop=True)
+    # 6. 상품별 리뷰 수
+    product_review_counts = df_products[["product_id", "total_reviews"]].copy()
+    product_review_counts.columns = ["product_id", "review_cnt"]
+    product_review_counts = product_review_counts.sort_values(
+        "review_cnt", ascending=False
     )
 
-
-def build_review_count_summary(product_review_table: pd.DataFrame) -> pd.DataFrame:
-    """상품별 리뷰 수에 대한 기술통계(describe) 테이블."""
-    if len(product_review_table) == 0:
-        return pd.DataFrame()
-
-    return (
-        product_review_table["review_cnt"]
+    # 7. 상품별 리뷰 수 통계 요약
+    review_cnt_summary = (
+        df_products["total_reviews"]
         .describe(percentiles=[0.5, 0.75, 0.9, 0.95, 0.99])
-        .to_frame()
-        .T
+        .to_dict()
     )
 
-
-def build_review_count_bins(
-    product_review_table: pd.DataFrame, bins: Tuple[int, ...]
-) -> pd.DataFrame:
-    """
-    상품별 리뷰 수를 bins로 구간화하여 각 구간에 속한 상품 수를 반환.
-    (시각화용 histogram/bar용)
-    """
-    if len(product_review_table) == 0:
-        return pd.DataFrame(columns=["bin", "product_cnt"])
-
-    values = product_review_table["review_cnt"].to_numpy()
-    edges = np.array(bins, dtype=float)
-    cut_bins = np.concatenate([edges, [np.inf]])
-
-    labels = [f"{int(edges[i])}~{int(edges[i+1]-1)}" for i in range(len(edges) - 1)] + [
-        f"{int(edges[-1])}+"
+    # 8. 리뷰 수 구간별 상품 수
+    bins = [1, 2, 3, 5, 10, 20, 50, 100, 200, 500, 1000, float("inf")]
+    labels = [
+        "1~1",
+        "2~2",
+        "3~4",
+        "5~9",
+        "10~19",
+        "20~49",
+        "50~99",
+        "100~199",
+        "200~499",
+        "500~999",
+        "1000+",
+    ]
+    df_products["review_bin"] = pd.cut(
+        df_products["total_reviews"], bins=bins, labels=labels, right=False
+    )
+    review_bins = df_products["review_bin"].value_counts().sort_index()
+    review_bins_list = [
+        {"bin": str(idx), "product_cnt": int(val)} for idx, val in review_bins.items()
     ]
 
-    binned = pd.cut(values, bins=cut_bins, right=False, labels=labels)
-    return (
-        pd.Series(binned)
-        .value_counts(sort=False)
-        .rename_axis("bin")
-        .reset_index(name="product_cnt")
-    )
+    # 9. 카테고리별 평점 분포 (category_score_distribution)
+    category_score_dist = []
+    for _, row in df_category.iterrows():
+        cat = row["category"]
+        for score in [1, 2, 3, 4, 5]:
+            category_score_dist.append(
+                {"category": cat, "score": score, "cnt": int(row[f"rating_{score}"])}
+            )
 
-
-def build_score_distribution_table(score_cnt: Counter) -> pd.DataFrame:
-    """전체 별점 분포 테이블(score, cnt)."""
-    if not score_cnt:
-        return pd.DataFrame(columns=["score", "cnt"])
-
-    return (
-        pd.DataFrame([{"score": k, "cnt": v} for k, v in score_cnt.items()])
-        .sort_values("score")
-        .reset_index(drop=True)
-    )
-
-
-def build_category_score_table(
-    category_score_cnt: Dict[Tuple[str, int], int],
-) -> pd.DataFrame:
-    """카테고리-별점 분포 테이블(category, score, cnt)."""
-    if not category_score_cnt:
-        return pd.DataFrame(columns=["category", "score", "cnt"])
-
-    return (
-        pd.DataFrame(
-            [
-                {"category": c, "score": s, "cnt": v}
-                for (c, s), v in category_score_cnt.items()
-            ]
+    # 10. 카테고리별 평균 평점 (category_score_summary)
+    category_score_summary = []
+    for _, row in df_category.iterrows():
+        total_cnt = int(row["total_reviews"])
+        score_sum = sum(
+            score * int(row[f"rating_{score}"]) for score in [1, 2, 3, 4, 5]
         )
-        .sort_values(["category", "score"])
-        .reset_index(drop=True)
-    )
-
-
-def build_category_score_summary(category_score_table: pd.DataFrame) -> pd.DataFrame:
-    """카테고리별 평균 별점(mean_score) 및 카운트(total_cnt) 테이블."""
-    if len(category_score_table) == 0:
-        return pd.DataFrame(
-            columns=["category", "total_cnt", "score_sum", "mean_score"]
+        mean_score = score_sum / total_cnt if total_cnt > 0 else 0
+        category_score_summary.append(
+            {
+                "category": row["category"],
+                "total_cnt": total_cnt,
+                "score_sum": score_sum,
+                "mean_score": mean_score,
+            }
         )
 
-    tmp = category_score_table.copy()
-    tmp["score_x_cnt"] = tmp["score"] * tmp["cnt"]
-
-    out = tmp.groupby("category", as_index=False).agg(
-        total_cnt=("cnt", "sum"), score_sum=("score_x_cnt", "sum")
-    )
-    out["mean_score"] = out["score_sum"] / out["total_cnt"]
-
-    return out.sort_values("total_cnt", ascending=False).reset_index(drop=True)
-
-
-def build_basic_stat_tables(
-    counters: Dict[str, Any], cfg: BasicStatsConfig
-) -> Dict[str, pd.DataFrame]:
-    """
-    누적 카운터/셋 자료구조를 최종 DataFrame들로 변환.
-    """
-    category_product_counts = build_category_product_table(
-        counters["category_products"]
-    )
-    product_review_counts = build_product_review_table(counters["product_review_cnt"])
-    product_review_count_summary = build_review_count_summary(product_review_counts)
-    product_review_count_bins = build_review_count_bins(
-        product_review_counts, cfg.review_cnt_bins
-    )
-
-    score_distribution = build_score_distribution_table(counters["score_cnt"])
-    category_score_distribution = build_category_score_table(
-        counters["category_score_cnt"]
-    )
-    category_score_summary = build_category_score_summary(category_score_distribution)
-
-    return {
-        "category_product_counts": category_product_counts,
-        "product_review_counts": product_review_counts,
-        "product_review_count_summary": product_review_count_summary,
-        "product_review_count_bins": product_review_count_bins,
-        "score_distribution": score_distribution,
-        "category_score_distribution": category_score_distribution,
-        "category_score_summary": category_score_summary,
+    # 결과 구조화 (old 파일 형식)
+    stats_result = {
+        "meta": meta,
+        "category_count": category_product_counts.to_dict(orient="records"),
+        "category_score_part_count": category_score_dist,
+        "category_mean_score": category_score_summary,
+        "total_review_bins_count": review_bins_list,
+        "summary": {
+            k: float(v) if isinstance(v, (int, float)) else v
+            for k, v in review_cnt_summary.items()
+        },
+        "product_review_descending": product_review_counts.head(100).to_dict(
+            orient="records"
+        ),  # 상위 100개만
+        "score_count": score_count_list,
+        "category_details": category_stats,
+        "brand_top10": brand_stats,
     }
 
-
-# ===========================================
-# 최종 결과 테이블을 파일로 저장하고 저장 경로 반환
-# ===========================================
+    return stats_result
 
 
-def ensure_dir(path: str | Path) -> Path:
-    p = Path(path)
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+def analyze_rating_distribution(df_products) -> Dict[str, Any]:
+    """평점 분포 분석"""
+    print("\n" + "=" * 60)
+    print("평점 분포 상세 분석")
+    print("=" * 60)
 
-
-def save_dataframe(df: pd.DataFrame, out_base: Path, fmt: str) -> str:
-    """DataFrame 저장. out_base는 확장자 없는 경로."""
-    if fmt == "parquet":
-        out_path = out_base.with_suffix(".parquet")
-        df.to_parquet(out_path, index=False)
-        return str(out_path)
-
-    if fmt == "csv":
-        out_path = out_base.with_suffix(".csv")
-        df.to_csv(out_path, index=False, encoding="utf-8-sig")
-        return str(out_path)
-
-    raise ValueError(f"Unsupported save_format={fmt}. Use 'parquet' or 'csv'.")
-
-
-def save_basic_stat_tables(
-    tables: Dict[str, pd.DataFrame], output_dir: str | Path, fmt: str
-) -> Dict[str, str]:
-    """기본 통계 결과 테이블들을 파일로 저장하고 경로 dict 반환."""
-    out_dir = ensure_dir(output_dir)
-    saved_paths: Dict[str, str] = {}
-
-    for name, df in tables.items():
-        saved_paths[name] = save_dataframe(df, out_dir / f"basic_stats_{name}", fmt)
-
-    return saved_paths
-
-
-# ==========================
-# 최상단 키 고정
-# ==========================
-
-
-def tables_json(
-    tables: Dict[str, pd.DataFrame], meta: Dict[str, Any]
-) -> Dict[str, Any]:
-    mapping = {
-        "category_count": "category_product_counts",
-        "category_score_part_count": "category_score_distribution",
-        "category_mean_score": "category_score_summary",
-        "total_review_bins_count": "product_review_count_bins",
-        "summary": "product_review_count_summary",
-        "product_review_descending": "product_review_counts",
-        "score_count": "score_distribution",
+    total_ratings = {
+        "1점": int(df_products["rating_1"].sum()),
+        "2점": int(df_products["rating_2"].sum()),
+        "3점": int(df_products["rating_3"].sum()),
+        "4점": int(df_products["rating_4"].sum()),
+        "5점": int(df_products["rating_5"].sum()),
     }
 
-    out: Dict[str, Any] = {"meta": meta}
+    total = sum(total_ratings.values())
+    print("\n전체 평점 분포:")
+    for rating, count in total_ratings.items():
+        print(f"  {rating}: {count:,}개 ({count/total*100:.1f}%)")
 
-    for kor_key, table_key in mapping.items():
-        df = tables.get(table_key, pd.DataFrame())
-        out[kor_key] = df.to_dict(orient="records")
-
-    return out
-
-
-def save_json(payload: Dict[str, Any], output_path: str | Path) -> str:
-    p = Path(output_path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-    return str(p)
+    return {"rating_distribution": total_ratings, "total_ratings": total}
 
 
-# ==========================
-# 기본 통계 분석 전체 실행 함수
-# ==========================
+def save_json(data: Dict[str, Any], output_path: Path):
+    """JSON 저장"""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    print(f"\n✓ JSON 저장 완료: {output_path}")
+    return str(output_path)
 
 
-def run_basic_review_stats(
-    processed_root: str | Path = "data/processed_data",
-    cfg: BasicStatsConfig = BasicStatsConfig(),
-) -> Dict[str, Any]:
-    """
-    main에서 호출하는 "기본 통계량 산출" 엔트리 함수.
-    - processed_root 아래 suffix 파일들을 수집
-    - JSON 로드 -> 상품 단위 순회 -> 카운터 누적
-    - 최종 DF 변환
-    - 옵션이면 저장
-    """
-    meta = Counter()
-    counters = init_review_stat_counters()
+def main():
+    """메인 실행 함수"""
+    # 데이터 로드
+    df_products, df_category, df_reviews = load_all_data()
 
-    # meta 기본 키를 미리 만들어두면 로그가 안정적임(0이어도 항상 출력)
-    meta["file_read_error"] += 0
-    meta["missing_product_id"] += 0
-    meta["invalid_score"] += 0
-    meta["missing_rating_distribution"] += 0
-    # total_reviews와 rating_distribution 합이 다른 상품 수
-    meta["review_cnt_mismatch"] += 0
+    # 기본 통계
+    basic_stats = analyze_basic_stats(df_products, df_category, df_reviews)
 
-    # resolve_input_files 사용 (AUTO 지원)
-    files = resolve_input_files(processed_root, cfg)
-    meta["n_files"] = len(files)
+    # 평점 분포
+    rating_dist = analyze_rating_distribution(df_products)
 
-    for fp in files:
-        try:
-            obj = load_review_json(fp)
-        except Exception:
-            meta["file_read_error"] += 1
-            continue
-
-        for product_info, reviews_list in iter_products_with_reviews(obj):
-            update_basic_stat_counters(counters, product_info, reviews_list, cfg, meta)
-
-    tables = build_basic_stat_tables(counters, cfg)
-    result: Dict[str, Any] = {"meta": dict(meta), **tables}
-
-    if cfg.save_outputs:
-        output_dir = Path(processed_root) / cfg.output_dirname
-        result["saved_paths"] = save_basic_stat_tables(
-            tables, output_dir, cfg.save_format
-        )
+    # 최종 결과 통합
+    final_result = {**basic_stats, "rating_distribution_detail": rating_dist}
 
     # JSON 저장
-    if cfg.save_summary_json:
-        output_dir = Path(processed_root) / cfg.output_dirname
-        payload = tables_json(tables, meta=dict(meta))
-        json_path = output_dir / cfg.summary_json_name
-        result["team_json_path"] = save_json(payload, json_path)
+    save_json(final_result, OUTPUT_JSON)
 
-    return result
+    print("\n" + "=" * 60)
+    print("분석 완료!")
+    print("=" * 60)
+    print(f"저장 위치: {OUTPUT_JSON}")
 
 
 if __name__ == "__main__":
-    run_basic_review_stats()
+    main()
