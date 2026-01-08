@@ -212,12 +212,15 @@ def main():
     print("새로운 Parquet 구조 생성 중...")
     print("=" * 60)
 
-    # 출력 디렉토리
+    # 출력 디렉토리 (Hive 파티셔닝 형식)
     DATA_DIR = "./data/processed_data"
+    CATEGORY_SUMMARY_DIR = os.path.join(DATA_DIR, "category_summary")
+    PRODUCTS_FINAL_DIR = os.path.join(DATA_DIR, "integrated_products_final")
     DETAILED_STATS_DIR = os.path.join(DATA_DIR, "detailed_stats")
     PARTITIONED_REVIEWS_DIR = os.path.join(DATA_DIR, "partitioned_reviews")
 
-    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(CATEGORY_SUMMARY_DIR, exist_ok=True)
+    os.makedirs(PRODUCTS_FINAL_DIR, exist_ok=True)
     os.makedirs(DETAILED_STATS_DIR, exist_ok=True)
     os.makedirs(PARTITIONED_REVIEWS_DIR, exist_ok=True)
 
@@ -329,15 +332,31 @@ def main():
     )
     df_products_final = df_products_final.drop(columns=["_sort_key"])  # 임시 컬럼 제거
 
-    integrated_path = os.path.join(DATA_DIR, "integrated_products_final.parquet")
-    df_products_final.to_parquet(
-        integrated_path, engine="pyarrow", compression="snappy", index=False
-    )
+    # integrated_products_final 저장 (Hive 파티셔닝 - 카테고리별)
+    print("\nintegrated_products_final 카테고리별 저장 중...")
+    products_count = 0
+    for category in (
+        df_products_final["product_id"]
+        .apply(lambda x: "_".join(x.split("_")[:-1]) if "_" in x else "기타")
+        .unique()
+    ):
+        df_category = df_products_final[
+            df_products_final["product_id"].str.startswith(category + "_")
+        ]
 
-    product_size_mb = os.path.getsize(integrated_path) / 1024 / 1024
-    print(f"✓ 저장 완료: {integrated_path}")
-    print(f"  - 상품 수: {len(df_products_final):,}개")
-    print(f"  - 파일 크기: {product_size_mb:.2f} MB")
+        partition_dir = os.path.join(PRODUCTS_FINAL_DIR, f"category={category}")
+        os.makedirs(partition_dir, exist_ok=True)
+
+        category_path = os.path.join(partition_dir, "data.parquet")
+        df_category.to_parquet(
+            category_path, engine="pyarrow", compression="snappy", index=False
+        )
+
+        file_size_mb = os.path.getsize(category_path) / 1024 / 1024
+        products_count += 1
+        print(f"  ✓ {category}: {len(df_category):,}개 상품 ({file_size_mb:.2f} MB)")
+
+    print(f"✓ 총 {products_count}개 카테고리 파티션 생성 완료")
 
     # 1-1. category_summary.parquet 생성 (카테고리별 전체 통계)
     print("\n[1-1] category_summary.parquet 생성 중...")
@@ -379,7 +398,8 @@ def main():
             stats[f"rating_{score}"] += 1
 
     df_category_summary = pd.DataFrame(list(category_stats.values()))
-    category_summary_path = os.path.join(DATA_DIR, "category_summary.parquet")
+    # 1. category_summary 저장 (Hive 파티셔닝)
+    category_summary_path = os.path.join(CATEGORY_SUMMARY_DIR, "data.parquet")
     df_category_summary.to_parquet(
         category_summary_path, engine="pyarrow", compression="snappy", index=False
     )
@@ -446,15 +466,16 @@ def main():
     stats_count = 0
     for category, stats_data in stats_by_category.items():
         df_stats = pd.DataFrame(stats_data)
-        safe_category = category.replace("/", "_").replace(" ", "_")
-        stats_path = os.path.join(
-            DETAILED_STATS_DIR, f"detailed_stats_category_{safe_category}.parquet"
-        )
+        # Hive 파티션 디렉토리 생성
+        partition_dir = os.path.join(DETAILED_STATS_DIR, f"category={category}")
+        os.makedirs(partition_dir, exist_ok=True)
+
+        stats_path = os.path.join(partition_dir, "data.parquet")
         df_stats.to_parquet(
             stats_path, engine="pyarrow", compression="snappy", index=False
         )
         stats_count += 1
-        print(f"  ✓ {safe_category}: {len(df_stats):,}개 키워드")
+        print(f"  ✓ {category}: {len(df_stats):,}개 키워드")
 
     print(f"✓ 총 {stats_count}개 카테고리 파티션 생성 완료")
 
@@ -501,20 +522,18 @@ def main():
     reviews_count = 0
     for category, review_data in reviews_by_category.items():
         df_reviews = pd.DataFrame(review_data)
-        safe_category = category.replace("/", "_").replace(" ", "_")
-        reviews_path = os.path.join(
-            PARTITIONED_REVIEWS_DIR,
-            f"partitioned_reviews_category_{safe_category}.parquet",
-        )
+        # Hive 파티션 디렉토리 생성
+        partition_dir = os.path.join(PARTITIONED_REVIEWS_DIR, f"category={category}")
+        os.makedirs(partition_dir, exist_ok=True)
+
+        reviews_path = os.path.join(partition_dir, "data.parquet")
         df_reviews.to_parquet(
             reviews_path, engine="pyarrow", compression="snappy", index=False
         )
 
         review_size_mb = os.path.getsize(reviews_path) / 1024 / 1024
         reviews_count += 1
-        print(
-            f"  ✓ {safe_category}: {len(df_reviews):,}개 리뷰 ({review_size_mb:.2f} MB)"
-        )
+        print(f"  ✓ {category}: {len(df_reviews):,}개 리뷰 ({review_size_mb:.2f} MB)")
 
     print(f"✓ 총 {reviews_count}개 카테고리 파티션 생성 완료")
 

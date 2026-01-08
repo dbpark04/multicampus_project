@@ -128,13 +128,16 @@ def preprocess_and_tokenize_file(args):
                 "reason": f"모든 상품의 리뷰가 {min_reviews}개 미만",
             }
 
-        # 4-2. without_text의 product_id 수정 (카테고리_원본ID)
-        for product in without_text.get("data", []):
+        # 4-2. without_text의 product_id 수정 (카테고리별 순차 번호)
+        # with_text에서 사용한 마지막 번호 다음부터 시작
+        next_product_num = len(filtered_with_text) + 1
+
+        for product_idx, product in enumerate(without_text.get("data", [])):
             p_info = product.get("product_info", {})
             original_id = p_info.get("product_id", p_info.get("id", ""))
             category = unicodedata.normalize("NFC", str(base_name))
             unique_product_id = unicodedata.normalize(
-                "NFC", f"{category}_{original_id}"
+                "NFC", f"{category}_{next_product_num + product_idx}"
             )
             p_info["product_id"] = unique_product_id
             p_info["original_product_id"] = original_id
@@ -147,12 +150,12 @@ def preprocess_and_tokenize_file(args):
         for product_idx, product in enumerate(with_text.get("data", [])):
             p_info = product.get("product_info", {})
 
-            # product_id를 전역적으로 고유하게 만들기 (카테고리_원본ID)
+            # product_id를 카테고리별 순차 번호로 고유하게 생성 (카테고리_1, 카테고리_2, ...)
             original_id = p_info.get("product_id", p_info.get("id", ""))
             category = unicodedata.normalize("NFC", str(base_name))  # NFC 정규화
             unique_product_id = unicodedata.normalize(
-                "NFC", f"{category}_{original_id}"
-            )  # NFC 정규화
+                "NFC", f"{category}_{product_idx + 1}"
+            )  # 순차 번호 (1부터 시작)
 
             # product_info에 고유 ID 업데이트
             p_info["product_id"] = unique_product_id
