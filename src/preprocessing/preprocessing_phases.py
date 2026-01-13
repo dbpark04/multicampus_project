@@ -310,11 +310,12 @@ def vectorize_file(args):
 
             product_tokens = tokenized_data[product_idx]
             product_info = product.get("product_info", {})
+            reviews_data = product.get("reviews", {}).get("data", [])
 
-            for review_idx, review in enumerate(
-                product.get("reviews", {}).get("data", [])
-            ):
-                # 저장된 토큰 재사용
+            # 리뷰 정보 미리 수집
+            review_infos = []
+            full_texts = []
+            for review_idx, review in enumerate(reviews_data):
                 saved_review = product_tokens["reviews"][review_idx]
                 tokens = saved_review["tokens"]
                 score = saved_review["score"]
@@ -328,7 +329,6 @@ def vectorize_file(args):
                 else:
                     label = None  # 중립
 
-                # 리뷰 벡터 생성
                 review_detail = {
                     "product_id": product_info.get("product_id"),
                     "id": review.get("id"),
@@ -347,45 +347,68 @@ def vectorize_file(args):
                     "helpful_count": review.get("helpful_count"),
                 }
 
-                # 각 모델별로 벡터 생성
-                for model_name in vectorizer_type:
-                    model_start = time.time()
+                review_infos.append(
+                    {
+                        "review_detail": review_detail,
+                        "tokens": tokens,
+                        "review_id": review.get("id"),
+                        "review_idx": review_idx,
+                    }
+                )
+                full_texts.append(full_text)
 
-                    if model_name == "word2vec" and w2v_model:
-                        # Word2Vec 벡터 생성
-                        word_vectors = [
-                            w2v_model.wv[w] for w in tokens if w in w2v_model.wv
-                        ]
-                        if word_vectors:
-                            vec = np.mean(word_vectors, axis=0)
-                        else:
-                            vec = np.zeros(100)
-
-                        review_detail[model_name] = vec.tolist()
-                        review_vectors_by_model[model_name].append(
-                            {
-                                "vector": vec,
-                                "review_id": review.get("id"),
-                                "review_idx": review_idx,
-                            }
-                        )
-                    elif model_name in vectorizers:
-                        # Transformer 기반 모델 (BERT, RoBERTa, KoELECTRA 등)
-                        vec = vectorizers[model_name].encode(full_text)
-                        review_detail[model_name] = vec.tolist()
-                        review_vectors_by_model[model_name].append(
-                            {
-                                "vector": vec,
-                                "review_id": review.get("id"),
-                                "review_idx": review_idx,
-                            }
-                        )
+            # Word2Vec 벡터 생성 (개별 처리)
+            if "word2vec" in vectorizer_type and w2v_model:
+                model_start = time.time()
+                for info in review_infos:
+                    tokens = info["tokens"]
+                    word_vectors = [
+                        w2v_model.wv[w] for w in tokens if w in w2v_model.wv
+                    ]
+                    if word_vectors:
+                        vec = np.mean(word_vectors, axis=0)
                     else:
-                        review_detail[model_name] = None
+                        vec = np.zeros(100)
 
-                    model_times[model_name] += time.time() - model_start
+                    info["review_detail"]["word2vec"] = vec.tolist()
+                    review_vectors_by_model["word2vec"].append(
+                        {
+                            "vector": vec,
+                            "review_id": info["review_id"],
+                            "review_idx": info["review_idx"],
+                        }
+                    )
+                model_times["word2vec"] += time.time() - model_start
 
-                review_details.append(review_detail)
+            # Transformer 모델 벡터 생성 (배치 처리)
+            transformer_models = [m for m in vectorizer_type if m in vectorizers]
+            for model_name in transformer_models:
+                model_start = time.time()
+
+                # 배치로 한 번에 벡터화
+                vectors = vectorizers[model_name].encode_batch(full_texts)
+
+                for idx, (info, vec) in enumerate(zip(review_infos, vectors)):
+                    info["review_detail"][model_name] = vec.tolist()
+                    review_vectors_by_model[model_name].append(
+                        {
+                            "vector": vec,
+                            "review_id": info["review_id"],
+                            "review_idx": info["review_idx"],
+                        }
+                    )
+
+                model_times[model_name] += time.time() - model_start
+
+            # 사용하지 않는 모델은 None 설정
+            for model_name in vectorizer_type:
+                if model_name != "word2vec" and model_name not in vectorizers:
+                    for info in review_infos:
+                        info["review_detail"][model_name] = None
+
+            # review_details에 추가
+            for info in review_infos:
+                review_details.append(info["review_detail"])
 
             # 각 모델별 상품 대표 벡터 생성
             for model_name in vectorizer_type:

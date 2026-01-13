@@ -68,7 +68,7 @@ class BERTVectorizer:
         return cls_embedding
 
     def encode_batch(
-        self, texts: List[str], max_length: int = 512, batch_size: int = 32
+        self, texts: List[str], max_length: int = 512, batch_size: int = 128
     ) -> List[np.ndarray]:
         """
         여러 텍스트를 배치로 벡터화 (효율적)

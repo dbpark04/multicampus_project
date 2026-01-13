@@ -67,7 +67,7 @@ VECTORIZER_TYPE = ["word2vec", "bert", "roberta", "koelectra"]  # 여기를 변�
 # 모델별 설정
 MODEL_CONFIGS = {
     "bert": "klue/bert-base",
-    "roberta": "klue/roberta-small",
+    "roberta": "klue/roberta-base",
     "koelectra": "monologg/koelectra-base-v3-discriminator",
 }
 
@@ -682,46 +682,50 @@ def main():
         print("=" * 60)
         print("Google Drive 백업 시작")
         print("=" * 60)
-        
+
         try:
             from google.colab import drive
-            
+
             # Drive 마운트 (이미 마운트되어 있으면 스킵)
             if not os.path.exists("/content/drive"):
                 print("\nDrive 마운트 중...")
-                drive.mount('/content/drive')
-            
+                drive.mount("/content/drive")
+
             import shutil
-            
+
             # 백업 경로 설정
             drive_backup_base = "/content/drive/MyDrive/multicampus_project_backup"
             drive_processed = os.path.join(drive_backup_base, "processed_data")
             drive_models = os.path.join(drive_backup_base, "models")
-            
+
             # processed_data 백업
             print(f"\n처리된 데이터를 Drive로 백업 중...")
             if os.path.exists(PROCESSED_DATA_DIR):
                 shutil.copytree(PROCESSED_DATA_DIR, drive_processed, dirs_exist_ok=True)
-                backup_size = sum(
-                    os.path.getsize(os.path.join(dirpath, filename))
-                    for dirpath, _, filenames in os.walk(drive_processed)
-                    for filename in filenames
-                ) / 1024 / 1024
+                backup_size = (
+                    sum(
+                        os.path.getsize(os.path.join(dirpath, filename))
+                        for dirpath, _, filenames in os.walk(drive_processed)
+                        for filename in filenames
+                    )
+                    / 1024
+                    / 1024
+                )
                 print(f"✓ 데이터 백업 완료: {drive_processed}")
                 print(f"  - 크기: {backup_size:.1f} MB")
-            
+
             # models 백업
             local_models = "/content/models"
             if os.path.exists(local_models):
                 print(f"\n모델을 Drive로 백업 중...")
                 shutil.copytree(local_models, drive_models, dirs_exist_ok=True)
                 print(f"✓ 모델 백업 완료: {drive_models}")
-            
+
             print("\n" + "=" * 60)
             print("Drive 백업 완료!")
             print(f"백업 위치: {drive_backup_base}")
             print("=" * 60 + "\n")
-            
+
         except Exception as e:
             print(f"\n[경고] Drive 백업 실패: {e}")
             print("세션 종료 시 /content 데이터가 삭제될 수 있습니다.")
