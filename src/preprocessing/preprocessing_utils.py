@@ -9,10 +9,15 @@ import pickle
 import unicodedata
 import numpy as np
 import pandas as pd
-from konlpy.tag import Okt
+import sys
+from io import StringIO
+from kiwipiepy import Kiwi
 
-# 형태소 분석기 초기화
-okt = Okt()
+# 형태소 분석기 초기화 (quantization 경고 메시지 억제)
+_original_stderr = sys.stderr
+sys.stderr = StringIO()
+kiwi = Kiwi()
+sys.stderr = _original_stderr
 
 
 def load_stopwords(filename="stopwords-ko.txt"):
@@ -32,16 +37,22 @@ def load_stopwords(filename="stopwords-ko.txt"):
 
 
 def get_tokens(text, stopwords):
-    """텍스트를 토큰화"""
+    """텍스트를 토큰화 (Kiwi 사용)"""
     if not isinstance(text, str):
         return []
     clean_text = re.sub(r"[^가-힣0-9\s]", " ", text)
     clean_text = re.sub(r"\s+", " ", clean_text).strip()
 
     tokens = []
-    for word, pos in okt.pos(clean_text, stem=True):
-        if pos in ("Noun", "Verb", "Adjective") and word not in stopwords:
-            tokens.append(word)
+    # Kiwi: analyze() 결과에서 형태소 추출
+    result = kiwi.analyze(clean_text)
+    if result and len(result) > 0:
+        for token in result[0][0]:
+            word = token.form
+            pos = token.tag
+            # NNG(일반명사), NNP(고유명사), VV(동사), VA(형용사)
+            if pos in ("NNG", "NNP", "VV", "VA") and word not in stopwords:
+                tokens.append(word)
     return tokens
 
 
