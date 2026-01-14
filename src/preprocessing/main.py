@@ -74,6 +74,16 @@ MODEL_CONFIGS = {
 # ========== 리뷰 필터링 설정 ==========
 MIN_REVIEWS_PER_PRODUCT = 30  # 이 개수 이하의 리뷰를 가진 상품 제외
 
+# ========== 배치 사이즈 테스트 모드 ==========
+BATCH_SIZE_TEST_MODE = False  # True면 Phase 3를 여러 배치로 테스트
+BATCH_SIZES_TO_TEST = [16, 32, 64, 128, 256, 512, 1024]  # 테스트할 배치 사이즈 목록
+
+# ========== Phase 실행 제어 ==========
+# 미세조정 전: SKIP_PHASE_3 = True (Phase 1-2만 실행, Parquet 생성)
+# 미세조정 후: SKIP_PHASE_1_2 = True (Phase 3만 실행, 커스텀 모델로 벡터화)
+SKIP_PHASE_1_2 = False  # True면 Phase 1-2 건너뛰기 (토큰 파일 재사용)
+SKIP_PHASE_3 = False  # True면 Phase 3 건너뛰기 (벡터화 안 함)
+
 
 def main():
     """
@@ -233,6 +243,104 @@ def main():
     print(f"\nPhase 2 완료 - 소요 시간: {phase2_time:.2f}초\n")
 
     # ========== Phase 3: 벡터화 + 대표 리뷰 선정 ==========
+    # 배치 사이즈 테스트 모드
+    if BATCH_SIZE_TEST_MODE:
+        print("\n" + "=" * 60)
+        print(f"{'배치 사이즈 테스트 모드':^60}")
+        print(f"테스트할 배치 사이즈: {BATCH_SIZES_TO_TEST}")
+        print("=" * 60 + "\n")
+
+        batch_test_results = []
+
+        for test_batch_size in BATCH_SIZES_TO_TEST:
+            print("\n" + "=" * 60)
+            print(f"배치 사이즈 {test_batch_size} 테스트 중...")
+            print("=" * 60)
+
+            phase3_start = time.time()
+
+            vectorize_args = [
+                (
+                    result["base_name"],
+                    TEMP_TOKENS_DIR,
+                    result["output_dir"],
+                    w2v_model,
+                    vectorizers,
+                    VECTORIZER_TYPE,
+                    test_batch_size,  # 배치 사이즈 전달
+                )
+                for result in phase1_results
+            ]
+
+            all_products = []
+            all_reviews = []
+            total_model_times = {model_name: 0.0 for model_name in VECTORIZER_TYPE}
+
+            # 순차 처리 (테스트의 일관성을 위해)
+            for args in tqdm(
+                vectorize_args, desc=f"배치 {test_batch_size}", unit="파일"
+            ):
+                result = vectorize_file(args)
+
+                if result["status"] == "success":
+                    all_products.extend(result["product_summaries"])
+                    all_reviews.extend(result["review_details"])
+                    for model_name, model_time in result.get("model_times", {}).items():
+                        total_model_times[model_name] += model_time
+
+            phase3_time = time.time() - phase3_start
+
+            # 결과 저장
+            test_result = {
+                "batch_size": test_batch_size,
+                "total_time": phase3_time,
+                "products_count": len(all_products),
+                "reviews_count": len(all_reviews),
+                "model_times": total_model_times.copy(),
+            }
+            batch_test_results.append(test_result)
+
+            print(f"\n배치 {test_batch_size} 완료:")
+            print(f"  - 총 소요 시간: {phase3_time:.2f}초")
+            print(f"  - 처리 상품: {len(all_products):,}개")
+            print(f"  - 처리 리뷰: {len(all_reviews):,}개")
+            for model_name in sorted(VECTORIZER_TYPE):
+                print(
+                    f"  - {model_name.upper()}: {total_model_times[model_name]:.2f}초"
+                )
+
+        # 테스트 결과 종합
+        print("\n" + "=" * 80)
+        print(f"{'배치 사이즈 테스트 결과 요약':^80}")
+        print("=" * 80)
+        print(f"{'배치':>10} {'총 시간':>12} {'상품수':>10} {'리뷰수':>10}", end="")
+        for model_name in sorted(VECTORIZER_TYPE):
+            print(f" {model_name.upper():>10}", end="")
+        print()
+        print("-" * 80)
+
+        for result in batch_test_results:
+            print(
+                f"{result['batch_size']:>10} {result['total_time']:>11.2f}s {result['products_count']:>10,} {result['reviews_count']:>10,}",
+                end="",
+            )
+            for model_name in sorted(VECTORIZER_TYPE):
+                model_time = result["model_times"].get(model_name, 0.0)
+                print(f" {model_time:>9.2f}s", end="")
+            print()
+
+        # 가장 빠른 배치 사이즈 찾기
+        fastest = min(batch_test_results, key=lambda x: x["total_time"])
+        print("\n" + "=" * 80)
+        print(
+            f"✓ 가장 빠른 배치 사이즈: {fastest['batch_size']} ({fastest['total_time']:.2f}초)"
+        )
+        print("=" * 80 + "\n")
+
+        # 테스트 모드에서는 여기서 종료
+        return
+
+    # 일반 모드: Phase 3 한 번만 실행
     print("=" * 60)
     print(
         f"Phase 3: 벡터화 및 대표 리뷰 선정 ({'병렬' if use_parallel_phase3 else '순차'} 처리)"
@@ -249,6 +357,7 @@ def main():
             w2v_model,
             vectorizers,  # dict로 전달
             VECTORIZER_TYPE,  # list로 전달
+            None,  # 배치 사이즈 (None이면 자동)
         )
         for result in phase1_results
     ]
@@ -698,10 +807,18 @@ def main():
             drive_processed = os.path.join(drive_backup_base, "processed_data")
             drive_models = os.path.join(drive_backup_base, "models")
 
+            # 기존 백업 삭제 (덮어쓰기 위해)
+            if os.path.exists(drive_processed):
+                print(f"\n기존 백업 삭제 중: {drive_processed}")
+                shutil.rmtree(drive_processed)
+            if os.path.exists(drive_models):
+                print(f"기존 모델 백업 삭제 중: {drive_models}")
+                shutil.rmtree(drive_models)
+
             # processed_data 백업
             print(f"\n처리된 데이터를 Drive로 백업 중...")
             if os.path.exists(PROCESSED_DATA_DIR):
-                shutil.copytree(PROCESSED_DATA_DIR, drive_processed, dirs_exist_ok=True)
+                shutil.copytree(PROCESSED_DATA_DIR, drive_processed)
                 backup_size = (
                     sum(
                         os.path.getsize(os.path.join(dirpath, filename))
@@ -718,7 +835,7 @@ def main():
             local_models = "/content/models"
             if os.path.exists(local_models):
                 print(f"\n모델을 Drive로 백업 중...")
-                shutil.copytree(local_models, drive_models, dirs_exist_ok=True)
+                shutil.copytree(local_models, drive_models)
                 print(f"✓ 모델 백업 완료: {drive_models}")
 
             print("\n" + "=" * 60)
