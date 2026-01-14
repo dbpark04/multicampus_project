@@ -29,7 +29,30 @@ class BERTVectorizer:
         # GPU 사용 가능하면 GPU 사용
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
-        print(f"BERT 모델 로딩 완료 (device: {self.device})")
+
+        # GPU에서 FP16 사용 (메모리 절약 + 속도 향상)
+        if self.device.type == "cuda":
+            self.model.half()
+
+            # GPU 종류별 최적 배치 사이즈 설정
+            gpu_name = torch.cuda.get_device_name(0)
+            if "A100" in gpu_name:
+                self.default_batch_size = 1024
+            elif "T4" in gpu_name:
+                self.default_batch_size = 256
+            else:
+                self.default_batch_size = 128
+
+            print(f"✓ BERT 모델 로딩 완료")
+            print(f"  - Device: {gpu_name}")
+            print(f"  - Precision: FP16")
+            print(f"  - Default Batch Size: {self.default_batch_size}")
+        else:
+            self.default_batch_size = 32
+            print(f"✓ BERT 모델 로딩 완료")
+            print(f"  - Device: CPU")
+            print(f"  - Precision: FP32")
+            print(f"  - Default Batch Size: {self.default_batch_size}")
 
     def encode(self, text: str, max_length: int = 512) -> np.ndarray:
         """
@@ -68,7 +91,11 @@ class BERTVectorizer:
         return cls_embedding
 
     def encode_batch(
-        self, texts: List[str], max_length: int = 512, batch_size: int = 128
+        self,
+        texts: List[str],
+        max_length: int = 512,
+        batch_size: int = None,
+        use_dynamic_batching: bool = True,
     ) -> List[np.ndarray]:
         """
         여러 텍스트를 배치로 벡터화 (효율적)
@@ -76,26 +103,43 @@ class BERTVectorizer:
         Args:
             texts: 텍스트 리스트
             max_length: 최대 토큰 길이
-            batch_size: 배치 크기
+            batch_size: 배치 크기 (None이면 자동 설정)
+            use_dynamic_batching: True면 길이별로 정렬 후 배치 (패딩 최소화)
 
         Returns:
             벡터 리스트
         """
+        # batch_size 자동 설정
+        if batch_size is None:
+            batch_size = self.default_batch_size
+
+        # Dynamic batching: 길이가 비슷한 문장끼리 묶음
+        if use_dynamic_batching and len(texts) > batch_size:
+            # 원본 순서 보존을 위한 인덱스
+            text_with_idx = [(i, t) for i, t in enumerate(texts)]
+            # 길이순 정렬 (짧은 것부터)
+            text_with_idx.sort(key=lambda x: len(x[1]))
+            sorted_indices = [idx for idx, _ in text_with_idx]
+            sorted_texts = [text for _, text in text_with_idx]
+        else:
+            sorted_indices = list(range(len(texts)))
+            sorted_texts = texts
+
         vectors = []
 
-        for i in range(0, len(texts), batch_size):
-            batch_texts = texts[i : i + batch_size]
+        for i in range(0, len(sorted_texts), batch_size):
+            batch_texts = sorted_texts[i : i + batch_size]
 
             # 빈 텍스트 처리
             processed_texts = [t if t and t.strip() else " " for t in batch_texts]
 
-            # 토큰화
+            # 토큰화 (배치 내 최장 문장에만 맞춤)
             inputs = self.tokenizer(
                 processed_texts,
                 return_tensors="pt",
                 max_length=max_length,
                 truncation=True,
-                padding=True,
+                padding=True,  # 배치 내 최장 길이로 패딩 (이제 비슷한 길이끼리 묶임)
             )
 
             # GPU로 이동
@@ -108,6 +152,14 @@ class BERTVectorizer:
             # [CLS] 토큰 벡터 추출
             batch_vectors = outputs.last_hidden_state[:, 0, :].cpu().numpy()
             vectors.extend(batch_vectors)
+
+        # 원본 순서로 복원
+        if use_dynamic_batching and len(texts) > batch_size:
+            # 정렬된 순서 → 원본 순서로 재배열
+            original_order_vectors = [None] * len(vectors)
+            for sorted_idx, original_idx in enumerate(sorted_indices):
+                original_order_vectors[original_idx] = vectors[sorted_idx]
+            return original_order_vectors
 
         return vectors
 
