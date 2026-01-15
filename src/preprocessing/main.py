@@ -4,6 +4,7 @@
 
 import json
 import os
+import sys
 import glob
 import time
 from datetime import datetime
@@ -18,6 +19,10 @@ from preprocessing_phases import (
 )
 from sentiment_analysis import analyze_skin_type_frequency
 
+# utils 모듈 import
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from utils.environment import get_execution_mode
+
 # ========== 실행 환경 설정 ==========
 # "auto": 자동 감지 (Colab이면 순차, 아니면 병렬)
 # "colab": Colab 강제 (순차 처리)
@@ -25,44 +30,10 @@ from sentiment_analysis import analyze_skin_type_frequency
 EXECUTION_MODE = "auto"  # 여기를 변경하여 선택
 
 
-def detect_environment():
-    """실행 환경 자동 감지"""
-    try:
-        # Colab 환경 감지 (여러 방법 시도)
-        import sys
-
-        # 방법 1: google.colab 모듈 확인
-        if "google.colab" in sys.modules:
-            return "colab"
-
-        # 방법 2: 직접 import 시도
-        try:
-            import google.colab
-
-            return "colab"
-        except:
-            pass
-
-        # 방법 3: 환경 변수 확인
-        if "COLAB_GPU" in os.environ or "COLAB_TPU_ADDR" in os.environ:
-            return "colab"
-
-        return "local"
-    except:
-        return "local"
-
-
-def get_execution_mode():
-    """실행 모드 결정"""
-    if EXECUTION_MODE == "auto":
-        return detect_environment()
-    return EXECUTION_MODE
-
-
 # ========== 벡터화 방법 설정 ==========
 # 리스트로 여러 모델 동시 사용 가능
 # 예: ["word2vec", "bert"] 또는 ["word2vec", "bert", "roberta", "koelectra"]
-VECTORIZER_TYPE = ["word2vec", "bert", "roberta", "koelectra"]  # 여기를 변경하여 선택
+VECTORIZER_TYPE = ["word2vec", "roberta"]  # 여기를 변경하여 선택
 
 # 모델별 설정
 MODEL_CONFIGS = {
@@ -78,12 +49,6 @@ MIN_REVIEWS_PER_PRODUCT = 30  # 이 개수 이하의 리뷰를 가진 상품 제
 BATCH_SIZE_TEST_MODE = False  # True면 Phase 3를 여러 배치로 테스트
 BATCH_SIZES_TO_TEST = [16, 32, 64, 128, 256, 512, 1024]  # 테스트할 배치 사이즈 목록
 
-# ========== Phase 실행 제어 ==========
-# 미세조정 전: SKIP_PHASE_3 = True (Phase 1-2만 실행, Parquet 생성)
-# 미세조정 후: SKIP_PHASE_1_2 = True (Phase 3만 실행, 커스텀 모델로 벡터화)
-SKIP_PHASE_1_2 = False  # True면 Phase 1-2 건너뛰기 (토큰 파일 재사용)
-SKIP_PHASE_3 = False  # True면 Phase 3 건너뛰기 (벡터화 안 함)
-
 
 def main():
     """
@@ -93,7 +58,7 @@ def main():
     Phase 3: 벡터화 + 대표 리뷰 선정 (환경에 따라 병렬/순차)
     """
     # 실행 환경 결정
-    exec_mode = get_execution_mode()
+    exec_mode = get_execution_mode(EXECUTION_MODE)
     use_parallel = exec_mode == "local"
 
     # Transformer 모델 사용 시 순차 처리 강제 (pickle 직렬화 문제)
@@ -357,7 +322,7 @@ def main():
             w2v_model,
             vectorizers,  # dict로 전달
             VECTORIZER_TYPE,  # list로 전달
-            None,  # 배치 사이즈 (None이면 자동)
+            None,  # 배치 사이즈 (None이면 bert_vectorizer에서 자동 설정)
         )
         for result in phase1_results
     ]
@@ -759,15 +724,9 @@ def main():
 
     print(f"✓ 총 {reviews_count}개 카테고리 파티션 생성 완료")
 
-    # ========== 임시 파일 정리 ==========
-    print(f"\n임시 토큰 파일 정리 중...")
-    try:
-        import shutil
-
-        shutil.rmtree(TEMP_TOKENS_DIR)
-        print(f"임시 디렉토리 삭제 완료: {TEMP_TOKENS_DIR}")
-    except Exception as e:
-        print(f"[경고] 임시 디렉토리 삭제 실패: {e}")
+    # ========== 임시 파일 유지 (재벡터화를 위해) ==========
+    print(f"\n✓ 토큰 파일 유지: {TEMP_TOKENS_DIR}")
+    print("  (재벡터화 시 필요하므로 삭제하지 않음)")
 
     # 종료 시간 및 소요 시간 계산
     end_time = time.time()
