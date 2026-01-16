@@ -11,13 +11,49 @@ import numpy as np
 import pandas as pd
 import sys
 from io import StringIO
-from kiwipiepy import Kiwi
 
-# 형태소 분석기 초기화 (quantization 경고 메시지 억제)
-_original_stderr = sys.stderr
-sys.stderr = StringIO()
-kiwi = Kiwi()
-sys.stderr = _original_stderr
+# 전역 토크나이저 변수
+_tokenizer = None
+_tokenizer_type = None
+
+
+def init_tokenizer(tokenizer_type="kiwi"):
+    """토크나이저 초기화 (Kiwi, Okt, Mecab 중 선택)"""
+    global _tokenizer, _tokenizer_type
+
+    if _tokenizer is not None and _tokenizer_type == tokenizer_type:
+        return _tokenizer
+
+    _tokenizer_type = tokenizer_type
+
+    if tokenizer_type == "kiwi":
+        from kiwipiepy import Kiwi
+
+        # quantization 경고 억제
+        _original_stderr = sys.stderr
+        sys.stderr = StringIO()
+        _tokenizer = Kiwi()
+        sys.stderr = _original_stderr
+        print(f"✓ Kiwi 토크나이저 초기화 완료")
+
+    elif tokenizer_type == "okt":
+        from konlpy.tag import Okt
+
+        _tokenizer = Okt()
+        print(f"✓ Okt 토크나이저 초기화 완료")
+
+    elif tokenizer_type == "mecab":
+        from konlpy.tag import Mecab
+
+        _tokenizer = Mecab()
+        print(f"✓ Mecab 토크나이저 초기화 완료")
+
+    else:
+        raise ValueError(
+            f"지원하지 않는 토크나이저: {tokenizer_type}. 'kiwi', 'okt', 'mecab' 중 선택하세요."
+        )
+
+    return _tokenizer
 
 
 def load_stopwords(filename="stopwords-ko.txt"):
@@ -37,22 +73,39 @@ def load_stopwords(filename="stopwords-ko.txt"):
 
 
 def get_tokens(text, stopwords):
-    """텍스트를 토큰화 (Kiwi 사용)"""
+    """텍스트를 토큰화 (선택된 토크나이저 사용)"""
+    global _tokenizer, _tokenizer_type
+
+    if _tokenizer is None:
+        raise RuntimeError(
+            "토크나이저가 초기화되지 않았습니다. init_tokenizer()를 먼저 호출하세요."
+        )
+
     if not isinstance(text, str):
         return []
     clean_text = re.sub(r"[^가-힣0-9\s]", " ", text)
     clean_text = re.sub(r"\s+", " ", clean_text).strip()
 
     tokens = []
-    # Kiwi: analyze() 결과에서 형태소 추출
-    result = kiwi.analyze(clean_text)
-    if result and len(result) > 0:
-        for token in result[0][0]:
-            word = token.form
-            pos = token.tag
+
+    if _tokenizer_type == "kiwi":
+        # Kiwi: analyze() 결과에서 형태소 추출
+        result = _tokenizer.analyze(clean_text)
+        if result and len(result) > 0:
+            for token in result[0][0]:
+                word = token.form
+                pos = token.tag
+                # NNG(일반명사), NNP(고유명사), VV(동사), VA(형용사)
+                if pos in ("NNG", "NNP", "VV", "VA") and word not in stopwords:
+                    tokens.append(word)
+
+    elif _tokenizer_type in ["okt", "mecab"]:
+        # Okt, Mecab: pos() 메서드 사용
+        for word, pos in _tokenizer.pos(clean_text):
             # NNG(일반명사), NNP(고유명사), VV(동사), VA(형용사)
             if pos in ("NNG", "NNP", "VV", "VA") and word not in stopwords:
                 tokens.append(word)
+
     return tokens
 
 

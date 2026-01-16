@@ -29,11 +29,16 @@ from utils.environment import get_execution_mode
 # "local": 로컬 강제 (병렬 처리)
 EXECUTION_MODE = "auto"  # 여기를 변경하여 선택
 
+# ========== 토크나이저 설정 ==========
+# "kiwi": Kiwi (기본, 빠르고 정확)
+# "okt": Okt (Twitter 한국어 처리기)
+# "mecab": Mecab (속도 최고, 사전 설치 필요)
+TOKENIZER = "mecab"  # 여기를 변경하여 선택
 
 # ========== 벡터화 방법 설정 ==========
 # 리스트로 여러 모델 동시 사용 가능
 # 예: ["word2vec", "bert"] 또는 ["word2vec", "bert", "roberta", "koelectra"]
-VECTORIZER_TYPE = ["word2vec", "roberta"]  # 여기를 변경하여 선택
+VECTORIZER_TYPE = ["word2vec", "bert", "roberta", "koelectra"]  # 여기를 변경하여 선택
 
 # 모델별 설정
 MODEL_CONFIGS = {
@@ -107,7 +112,13 @@ def main():
     # ========== Phase 1: 전처리 + 토큰화 ==========
     print("=" * 60)
     print(f"Phase 1: 전처리 및 토큰화 ({'병렬' if use_parallel else '순차'} 처리)")
+    print(f"토크나이저: {TOKENIZER.upper()}")
     print("=" * 60)
+
+    # 토크나이저 초기화
+    from preprocessing_utils import init_tokenizer
+
+    init_tokenizer(TOKENIZER)
 
     phase1_start = time.time()
     os.makedirs(TEMP_TOKENS_DIR, exist_ok=True)
