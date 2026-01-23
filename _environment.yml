@@ -12,6 +12,8 @@ dependencies:
   - seaborn
   - scikit-learn
   - joblib
+  - xgboost
+  - lightgbm
   - pip
   - pip:
       - gensim

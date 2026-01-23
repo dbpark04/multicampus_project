@@ -58,7 +58,7 @@ else:
 # ========== 사용할 모델 선택 ==========
 # 원하는 모델만 리스트에 포함시키세요
 # 예: ["word2vec", "bert", "roberta", "koelectra"]
-MODELS_TO_USE = ["word2vec", "bert", "roberta", "koelectra"]
+MODELS_TO_USE = ["roberta"]
 
 # 모델 경로 설정
 MODEL_PATHS = {

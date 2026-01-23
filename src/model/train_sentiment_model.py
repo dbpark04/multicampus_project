@@ -59,11 +59,21 @@ plt.rcParams["axes.unicode_minus"] = False  # 마이너스 깨짐 방지
 # ========== 학습할 조합 선택 ==========
 # 1) 벡터 타입 선택 (None이면 전부 사용)
 #    사용 가능: "word2vec", "bert", "roberta", "koelectra"
-VECTOR_TYPES_TO_USE = ["word2vec", "bert", "roberta", "koelectra"]  # roberta만 사용
+VECTOR_TYPES_TO_USE = ["roberta"]  # roberta만 사용
 # VECTOR_TYPES_TO_USE = None  # 전부 사용하려면 None
 
 # 2) ML 모델 선택
 #    사용 가능: "Logistic", "RandomForest", "DecisionTree", "XGBoost", "LightGBM", "SVM", "Voting", "Stacking"
+ML_MODELS_TO_USE = [
+    # "Logistic",
+    # "RandomForest",
+    # "DecisionTree",
+    "XGBoost",
+    # "LightGBM",
+    # "SVM",
+    # "Voting",
+    # "Stacking",
+]
 
 
 def load_review_data(partitioned_reviews_dir):
@@ -181,9 +191,7 @@ def get_model_dictionary():
         n_estimators=100, class_weight="balanced", random_state=42, n_jobs=-1
     )
     dt = DecisionTreeClassifier(class_weight="balanced", random_state=42)
-    xgb = XGBClassifier(
-        use_label_encoder=False, eval_metric="logloss", random_state=42, n_jobs=-1
-    )
+    xgb = XGBClassifier(eval_metric="logloss", random_state=42, n_jobs=-1)
     lgbm = LGBMClassifier(
         class_weight="balanced", random_state=42, n_jobs=-1, verbose=-1
     )

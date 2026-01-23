@@ -16,6 +16,12 @@ numpy
 pandas
 pyarrow
 
+# 머신러닝 라이브러리
+scikit-learn
+joblib
+xgboost
+lightgbm
+
 # 시각화 라이브러리
 matplotlib
 seaborn
