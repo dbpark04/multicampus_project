@@ -38,7 +38,7 @@ TOKENIZER = "mecab"  # 여기를 변경하여 선택
 # ========== 벡터화 방법 설정 ==========
 # 리스트로 여러 모델 동시 사용 가능
 # 예: ["word2vec", "bert"] 또는 ["word2vec", "bert", "roberta", "koelectra"]
-VECTORIZER_TYPE = ["word2vec", "bert", "roberta", "koelectra"]  # 여기를 변경하여 선택
+VECTORIZER_TYPE = ["roberta"]  # 여기를 변경하여 선택
 
 # 모델별 설정
 MODEL_CONFIGS = {
@@ -53,6 +53,17 @@ MIN_REVIEWS_PER_PRODUCT = 30  # 이 개수 이하의 리뷰를 가진 상품 제
 # ========== 배치 사이즈 테스트 모드 ==========
 BATCH_SIZE_TEST_MODE = False  # True면 Phase 3를 여러 배치로 테스트
 BATCH_SIZES_TO_TEST = [16, 32, 64, 128, 256, 512, 1024]  # 테스트할 배치 사이즈 목록
+
+
+# ========== 워커 프로세스 초기화 함수 ==========
+def init_worker(tokenizer_name):
+    """
+    Pool 워커 프로세스 초기화 시 호출
+    각 워커에서 토크나이저를 초기화
+    """
+    from preprocessing_utils import init_tokenizer
+
+    init_tokenizer(tokenizer_name)
 
 
 def main():
@@ -138,8 +149,8 @@ def main():
     phase1_results = []
 
     if use_parallel:
-        # 병렬 처리 (로컬 환경)
-        with Pool(MAX_WORKERS) as pool:
+        # 병렬 처리 (로컬 환경) - 각 워커에서 토크나이저 초기화
+        with Pool(MAX_WORKERS, initializer=init_worker, initargs=(TOKENIZER,)) as pool:
             for result in tqdm(
                 pool.imap_unordered(preprocess_and_tokenize_file, args_list),
                 total=len(json_files),
@@ -345,8 +356,8 @@ def main():
     total_model_times = {model_name: 0.0 for model_name in VECTORIZER_TYPE}
 
     if use_parallel_phase3:
-        # 병렬 처리 (로컬 환경, word2vec만 사용 시)
-        with Pool(MAX_WORKERS) as pool:
+        # 병렬 처리 (로컬 환경, word2vec만 사용 시) - 각 워커에서 토크나이저 초기화
+        with Pool(MAX_WORKERS, initializer=init_worker, initargs=(TOKENIZER,)) as pool:
             for result in tqdm(
                 pool.imap_unordered(vectorize_file, vectorize_args),
                 total=len(vectorize_args),
