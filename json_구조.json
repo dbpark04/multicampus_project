@@ -1,6 +1,6 @@
 {
   "search_name": "string",
-  "total_collected_reviews": "int", 
+  "total_collected_reviews": "int",
   "total_text_reviews": "int",
   "total_product": "int",
   "total_rating_distribution": {
@@ -13,7 +13,7 @@
   "data": [
     {
       "product_info": {
-        "product_id": "string", 
+        "product_id": "string",
         "brand": "string",
         "category_path": "string",
         "product_name": "string",
@@ -30,8 +30,8 @@
         }
       },
       "reviews": {
-        "total_count": "int",   
-        "text_count": "int",   
+        "total_count": "int",
+        "text_count": "int",
         "data": [
           {
             "id": "int",

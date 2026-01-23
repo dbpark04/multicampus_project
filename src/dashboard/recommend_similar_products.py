@@ -115,7 +115,7 @@ def recommend_similar_products(
                         "product_id": "로션_2",
                         "product_name": "상품명",
                         "brand": "브랜드",
-                        "score": 0.85,
+                        "recommend_score": 0.85,
                         "cosine_similarity": 0.92,
                         "sentiment_score": 0.78,
                         "category": "로션",
@@ -210,13 +210,15 @@ def recommend_similar_products(
             similarity = cosine_similarity(target_vector, product_vector)
 
             # 최종 점수 = 유사도 * 0.5 + 긍정확률 * 0.3 + 정규화_평점 * 0.2
-            score = similarity * 0.5 + sentiment * 0.3 + normalized_rating * 0.2
+            recommend_score = (
+                similarity * 0.5 + sentiment * 0.3 + normalized_rating * 0.2
+            )
         else:
             # 전체 랭킹 모드: 유사도 불필요
             similarity = None
 
             # 최종 점수 = 긍정확률 * 0.6 + 정규화_평점 * 0.4
-            score = sentiment * 0.6 + normalized_rating * 0.4
+            recommend_score = sentiment * 0.6 + normalized_rating * 0.4
 
         # 결과 저장
         result = {
@@ -225,7 +227,7 @@ def recommend_similar_products(
             "brand": product.get("brand", ""),
             "category": product.get("category", ""),
             "price": product.get("price"),
-            "score": float(score),
+            "recommend_score": float(recommend_score),
             "sentiment_score": float(sentiment),
             "normalized_rating": float(normalized_rating),
             "avg_rating": float(avg_rating),
@@ -256,7 +258,7 @@ def recommend_similar_products(
 
     for category, products in category_results.items():
         # 점수 높은 순으로 정렬
-        products.sort(key=lambda x: x["score"], reverse=True)
+        products.sort(key=lambda x: x["recommend_score"], reverse=True)
         # 상위 N개 선택
         top_products = products[:top_n]
         final_results[category] = top_products
@@ -314,7 +316,7 @@ def print_recommendations(recommendations: Dict[str, List[Dict[str, Any]]]):
                 f"{rank:<5} "
                 f"{product_name:<30} "
                 f"{brand:<15} "
-                f"{rec['score']:<8.3f} "
+                f"{rec['recommend_score']:<8.3f} "
                 f"{similarity_str} "
                 f"{rec['sentiment_score']:<8.3f} "
                 f"{rec.get('avg_rating', 0):<8.1f}"
@@ -365,3 +367,16 @@ if __name__ == "__main__":
     )
 
     print_recommendations(results)
+
+    print("results\n", results)
+
+    print("\n\n" + "=" * 100)
+
+    for category, items in results.items():
+        print(f"\nCategory: {category}")
+        for item in items:
+            print(
+                f"  - {item['product_id']}: Score={item['recommend_score']:.3f}, "
+                f"Sentiment={item['sentiment_score']:.3f}, "
+                f"Avg Rating={item['avg_rating']:.1f}"
+            )

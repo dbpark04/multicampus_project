@@ -263,7 +263,6 @@ def main():
                 kw.get("word", "") for kw in sentiment.get("positive_special", [])[:5]
             ],
             "sentiment_analysis": sentiment,
-            "recommend_score": product.get("recommend_score", 0.0),
             "avg_rating_with_text": (
                 sum(r.get("score", 0) for r in text_reviews) / len(text_reviews)
                 if text_reviews

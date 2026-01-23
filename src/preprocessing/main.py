@@ -489,7 +489,6 @@ def main():
             "skin_type": product.get("skin_type", "미분류"),
             "top_keywords": top_keywords,
             "sentiment_analysis": product.get("sentiment_analysis"),
-            "recommend_score": product.get("recommend_score", 0.0),
             # 통계 필드
             "avg_rating_with_text": avg_rating_with_text,
             "avg_rating_without_text": avg_rating_without_text,
