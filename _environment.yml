@@ -3,7 +3,7 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python=3.13
+  - python=3.12
   - numpy
   - tqdm
   - pandas
@@ -27,5 +27,6 @@ dependencies:
       - datasets
       - accelerate
       - streamlit
+      - sentence-transformers
 # 설치 법
 # conda env update -f _environment.yml

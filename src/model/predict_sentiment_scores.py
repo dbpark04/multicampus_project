@@ -80,7 +80,9 @@ def predict_sentiment_scores(model, df, vector_type="roberta"):
     return updated_count
 
 
-def process_category_files(model, partitioned_reviews_dir, vector_type="roberta"):
+def process_category_files(
+    model, partitioned_reviews_dir, vector_type="roberta_sentiment"
+):
     """
     카테고리별 파티션 파일 처리 (Hive 파티셔닝 형식)
 
@@ -186,17 +188,17 @@ def main():
     print("=" * 70)
 
     # 경로 설정
-    MODEL_PATH = "./models/sentiment_roberta_XGBoost.joblib"  # roberta 모델 사용
+    MODEL_PATH = "./models/roberta_sentiment_XGBoost.joblib"  # roberta 모델 사용
     PROCESSED_DATA_DIR = "./data/processed_data"
     PARTITIONED_REVIEWS_DIR = os.path.join(PROCESSED_DATA_DIR, "partitioned_reviews")
     PRODUCTS_FINAL_DIR = os.path.join(PROCESSED_DATA_DIR, "integrated_products_final")
-    VECTOR_TYPE = "roberta"  # 사용할 벡터 타입
+    VECTOR_TYPE = "roberta_sentiment"  # 사용할 벡터 타입
 
     # 1. 모델 로드
     if not os.path.exists(MODEL_PATH):
         print(f"\n[오류] 모델 파일을 찾을 수 없습니다: {MODEL_PATH}")
         print("먼저 train_sentiment_model.py를 실행하여 모델을 학습하세요.")
-        print(f"또는 models/ 디렉토리에서 roberta 모델을 확인하세요.")
+        print(f"또는 models/ 디렉토리에서 roberta_sentiment 모델을 확인하세요.")
         return
 
     model = load_model(MODEL_PATH)

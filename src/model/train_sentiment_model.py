@@ -58,8 +58,8 @@ plt.rcParams["axes.unicode_minus"] = False  # 마이너스 깨짐 방지
 
 # ========== 학습할 조합 선택 ==========
 # 1) 벡터 타입 선택 (None이면 전부 사용)
-#    사용 가능: "word2vec", "bert", "roberta", "koelectra"
-VECTOR_TYPES_TO_USE = ["roberta"]  # roberta만 사용
+#    사용 가능: "word2vec_sentiment", "bert_sentiment", "roberta_sentiment", "koelectra_sentiment"
+VECTOR_TYPES_TO_USE = ["roberta_sentiment"]  # roberta_sentiment만 사용
 # VECTOR_TYPES_TO_USE = None  # 전부 사용하려면 None
 
 # 2) ML 모델 선택
@@ -113,9 +113,15 @@ def prepare_training_data(reviews):
     if reviews:
         sample = reviews[0]
         for key in sample.keys():
-            # word2vec, bert, roberta, koelectra 등 벡터 필드 감지
+            # word2vec_sentiment, bert_sentiment, roberta_sentiment, koelectra_sentiment 등 벡터 필드 감지
             if (
-                key in ["word2vec", "bert", "roberta", "koelectra"]
+                key
+                in [
+                    "word2vec_sentiment",
+                    "bert_sentiment",
+                    "roberta_sentiment",
+                    "koelectra_sentiment",
+                ]
                 and sample.get(key) is not None
             ):
                 available_models.add(key)
@@ -551,7 +557,6 @@ def main():
 
     # 2. 학습 데이터 준비 (모든 모델 자동 감지)
     model_data = prepare_training_data(reviews)
-
     if not model_data:
         print("\n[중단] 학습 가능한 데이터가 없습니다.")
         return
@@ -645,9 +650,7 @@ def main():
             performance_results.append(performance)
 
             # 모델 저장
-            model_path = os.path.join(
-                MODEL_OUTPUT_DIR, f"sentiment_{combined_name}.joblib"
-            )
+            model_path = os.path.join(MODEL_OUTPUT_DIR, f"{combined_name}.joblib")
             joblib.dump(model, model_path)
             print(f"\n✓ 모델 저장 완료: {model_path}")
 
