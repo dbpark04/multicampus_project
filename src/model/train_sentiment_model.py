@@ -43,6 +43,11 @@ import seaborn as sns
 # 한글 폰트 설정
 from matplotlib import font_manager, rc
 import platform
+import sys
+
+# 환경 감지 유틸리티 import
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+from utils.environment import is_colab
 
 if platform.system() == "Windows":
     plt.rc("font", family="Malgun Gothic")
@@ -68,8 +73,8 @@ ML_MODELS_TO_USE = [
     # "Logistic",
     # "RandomForest",
     # "DecisionTree",
-    "XGBoost",
-    # "LightGBM",
+    # "XGBoost",
+    "LightGBM",
     # "SVM",
     # "Voting",
     # "Stacking",
@@ -252,9 +257,7 @@ def train_model(X_train, y_train, ml_model=None):
     return model, train_time
 
 
-def evaluate_model(
-    model, X_test, y_test, output_dir, model_name="model", X_train=None, y_train=None
-):
+def evaluate_model(model, X_test, y_test, output_dir, model_name="model"):
     print("\n모델 평가 중...")
     y_pred = model.predict(X_test)
     y_proba = model.predict_proba(X_test)[:, 1]  # 긍정 클래스 확률
@@ -341,39 +344,6 @@ def evaluate_model(
 
     print(f"Average Precision:    {avg_precision:.4f}")
 
-    # ============ K-Fold 교차 검증 ============
-    if X_train is not None and y_train is not None:
-        print("\n" + "=" * 70)
-        print("K-Fold 교차 검증 (5-Fold)")
-        print("=" * 70)
-
-        # 전체 데이터로 K-Fold 수행 (train + test 합쳐서)
-        X_full = np.vstack([X_train, X_test])
-        y_full = np.concatenate([y_train, y_test])
-
-        skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-        cv_scores = cross_val_score(
-            model,
-            X_full,
-            y_full,
-            cv=skf,
-            scoring="accuracy",
-        )
-        cv_f1_scores = cross_val_score(
-            model,
-            X_full,
-            y_full,
-            cv=skf,
-            scoring="f1",
-        )
-
-        print(f"\nAccuracy per fold: {[f'{score:.4f}' for score in cv_scores]}")
-        print(f"평균 Accuracy:     {cv_scores.mean():.4f} (±{cv_scores.std():.4f})")
-        print(f"\nF1 Score per fold: {[f'{score:.4f}' for score in cv_f1_scores]}")
-        print(
-            f"평균 F1 Score:     {cv_f1_scores.mean():.4f} (±{cv_f1_scores.std():.4f})"
-        )
-
     # ============ 시각화 ============
     fig, axes = plt.subplots(2, 3, figsize=(20, 12))
 
@@ -429,35 +399,8 @@ def evaluate_model(
     axes[1, 1].legend(loc="upper center")
     axes[1, 1].grid(alpha=0.3)
 
-    # 5. K-Fold 교차 검증 결과 시각화
-    if X_train is not None and y_train is not None:
-        X_full = np.vstack([X_train, X_test])
-        y_full = np.concatenate([y_train, y_test])
-
-        skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-        cv_scores = cross_val_score(model, X_full, y_full, cv=skf, scoring="accuracy")
-
-        fold_numbers = list(range(1, len(cv_scores) + 1))
-        axes[0, 2].bar(fold_numbers, cv_scores, color="skyblue", edgecolor="navy")
-        axes[0, 2].axhline(
-            y=cv_scores.mean(),
-            color="red",
-            linestyle="--",
-            label=f"평균: {cv_scores.mean():.4f}",
-        )
-        axes[0, 2].set_xlabel("Fold", fontsize=12)
-        axes[0, 2].set_ylabel("Accuracy", fontsize=12)
-        axes[0, 2].set_title(
-            "K-Fold 교차 검증 (Accuracy)", fontsize=14, fontweight="bold"
-        )
-        axes[0, 2].set_ylim([0.0, 1.0])
-        axes[0, 2].legend()
-        axes[0, 2].grid(alpha=0.3, axis="y")
-    else:
-        axes[0, 2].text(
-            0.5, 0.5, "K-Fold 데이터 없음", ha="center", va="center", fontsize=14
-        )
-        axes[0, 2].set_title("K-Fold 교차 검증", fontsize=14, fontweight="bold")
+    # 5. 빈 공간 활용
+    axes[0, 2].axis("off")
 
     # 6. 빈 공간에 메트릭 요약 표시
     metrics_text = f"""성능 요약
@@ -543,10 +486,16 @@ def main():
     print(f"감성 분석 모델 학습 (사용 모델: {', '.join(ML_MODELS_TO_USE)})")
     print("=" * 70)
 
-    # 경로 설정
-    PROCESSED_DATA_DIR = "./data/processed_data"
+    # 경로 설정 (Colab 환경 고려)
+    if is_colab():
+        BASE_DIR = "/content"
+        PROCESSED_DATA_DIR = os.path.join(BASE_DIR, "data/processed_data")
+        MODEL_OUTPUT_DIR = os.path.join(BASE_DIR, "models")
+    else:
+        PROCESSED_DATA_DIR = "./data/processed_data"
+        MODEL_OUTPUT_DIR = "./models"
+
     PARTITIONED_REVIEWS_DIR = os.path.join(PROCESSED_DATA_DIR, "partitioned_reviews")
-    MODEL_OUTPUT_DIR = "./models"
     os.makedirs(MODEL_OUTPUT_DIR, exist_ok=True)
 
     # 1. 데이터 로드
@@ -638,8 +587,6 @@ def main():
                 y_test,
                 MODEL_OUTPUT_DIR,
                 model_name=combined_name,
-                X_train=X_train,
-                y_train=y_train,
             )
 
             # 성능 결과 저장
