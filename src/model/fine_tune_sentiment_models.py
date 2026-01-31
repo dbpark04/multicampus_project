@@ -42,6 +42,11 @@ MAX_LENGTH = 512
 TEST_SIZE = 0.2
 RANDOM_SEED = 42
 
+# 샘플링 설정
+MAX_SAMPLES = 100000  # None이면 전체 데이터 사용, 숫자 입력 시 해당 개수만큼 샘플링
+MIN_TEXT_LENGTH = 20  # 최소 글자수 (너무 짧은 리뷰 제외)
+BALANCE_LABELS = True  # 긍정/부정 비율 균형 맞추기
+
 # 환경별 경로 설정
 exec_mode = get_execution_mode("auto")
 
@@ -145,8 +150,45 @@ def load_reviews_data():
     ][["full_text", "label"]].copy()
 
     df_filtered["label"] = df_filtered["label"].astype(int)
-    print(f"학습 가능 리뷰: {len(df_filtered):,}개")
+    print(f"유효한 리뷰: {len(df_filtered):,}개")
 
+    # 최소 글자수 필터링
+    df_filtered = df_filtered[
+        df_filtered["full_text"].str.len() >= MIN_TEXT_LENGTH
+    ].copy()
+    print(f"최소 글자수({MIN_TEXT_LENGTH}자) 이상: {len(df_filtered):,}개")
+
+    # 샘플링 (MAX_SAMPLES 설정된 경우)
+    if MAX_SAMPLES is not None and len(df_filtered) > MAX_SAMPLES:
+        print(f"\n샘플링: {len(df_filtered):,}개 → {MAX_SAMPLES:,}개")
+
+        if BALANCE_LABELS:
+            # 긍정/부정 비율 균형 맞춤 샘플링
+            label_counts = df_filtered["label"].value_counts()
+            print(f"  원본 레이블 분포: {dict(label_counts)}")
+
+            # 각 레이블별 샘플링 개수
+            samples_per_label = MAX_SAMPLES // len(label_counts)
+            sampled_dfs = []
+
+            for label in df_filtered["label"].unique():
+                label_df = df_filtered[df_filtered["label"] == label]
+                n_samples = min(len(label_df), samples_per_label)
+                sampled_dfs.append(
+                    label_df.sample(n=n_samples, random_state=RANDOM_SEED)
+                )
+
+            df_filtered = pd.concat(sampled_dfs, ignore_index=True).sample(
+                frac=1, random_state=RANDOM_SEED
+            )
+            print(
+                f"  샘플링 후 레이블 분포: {dict(df_filtered['label'].value_counts())}"
+            )
+        else:
+            # 단순 랜덤 샘플링
+            df_filtered = df_filtered.sample(n=MAX_SAMPLES, random_state=RANDOM_SEED)
+
+    print(f"최종 학습 데이터: {len(df_filtered):,}개")
     return df_filtered
 
 

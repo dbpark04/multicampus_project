@@ -33,6 +33,10 @@ NUM_EPOCHS = 1  # SimCSE는 보통 1에폭으로도 충분함
 MAX_LENGTH = 512
 RANDOM_SEED = 42
 
+# 샘플링 설정
+MAX_SAMPLES = 100000  # None이면 전체 데이터 사용, 숫자 입력 시 해당 개수만큼 샘플링
+MIN_TEXT_LENGTH = 20  # 최소 글자수 (너무 짧은 리뷰 제외)
+
 # 환경별 경로 설정
 exec_mode = get_execution_mode("auto")
 
@@ -94,12 +98,21 @@ def load_semantic_data():
 
         if found_col:
             texts = df[found_col].dropna().astype(str).str.strip().tolist()
-            all_texts.extend([t for t in texts if len(t) >= 10])
+            all_texts.extend([t for t in texts if len(t) >= MIN_TEXT_LENGTH])
 
     if not all_texts:
         raise ValueError("학습할 텍스트가 없습니다. 컬럼명을 확인하세요.")
 
-    print(f"✓ 추출된 텍스트: {len(all_texts):,}개")
+    print(f"✓ 최소 글자수({MIN_TEXT_LENGTH}자) 이상 텍스트: {len(all_texts):,}개")
+
+    # 샘플링 (MAX_SAMPLES 설정된 경우)
+    if MAX_SAMPLES is not None and len(all_texts) > MAX_SAMPLES:
+        import random
+
+        random.seed(RANDOM_SEED)
+        all_texts = random.sample(all_texts, MAX_SAMPLES)
+        print(f"✓ 샘플링 완료: {MAX_SAMPLES:,}개")
+
     return all_texts
 
 
