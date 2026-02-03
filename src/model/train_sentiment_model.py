@@ -95,13 +95,16 @@ def load_review_data(partitioned_reviews_dir, finetune_ids_path=None):
         return []
 
     # 파인튜닝에 사용된 ID 로드 (있는 경우)
-    finetune_ids = set()
+    finetune_id_strings = set()
     if finetune_ids_path and os.path.exists(finetune_ids_path):
         print(f"\n파인튜닝 사용 ID 로드 중: {finetune_ids_path}")
         finetune_df = pd.read_csv(finetune_ids_path)
-        # (product_id, id) 튜플로 저장
-        finetune_ids = set(zip(finetune_df["product_id"], finetune_df["id"]))
-        print(f"✓ 제외할 ID: {len(finetune_ids):,}개")
+        # 벡터화를 위해 "product_id\x00id" 형식의 문자열 세트로 저장
+        finetune_id_strings = {
+            f"{pid}\x00{rid}"
+            for pid, rid in zip(finetune_df["product_id"], finetune_df["id"])
+        }
+        print(f"✓ 제외할 ID: {len(finetune_id_strings):,}개")
 
     all_reviews = []
     total_loaded = 0
@@ -115,17 +118,14 @@ def load_review_data(partitioned_reviews_dir, finetune_ids_path=None):
             )
             total_loaded += len(df)
 
-            # 파인튜닝 사용 ID 제외
-            if finetune_ids:
+            # 파인튜닝 사용 ID 제외 (벡터화 방식으로 최적화)
+            if finetune_id_strings:
                 before_count = len(df)
-                # product_id와 id가 모두 있는 행만 필터링
-                df = df[
-                    ~df.apply(
-                        lambda row: (row.get("product_id"), row.get("id"))
-                        in finetune_ids,
-                        axis=1,
-                    )
-                ]
+                # product_id와 id를 결합한 문자열 생성 후 isin으로 빠르게 필터링
+                current_ids = (
+                    df["product_id"].astype(str) + "\x00" + df["id"].astype(str)
+                )
+                df = df[~current_ids.isin(finetune_id_strings)]
                 excluded = before_count - len(df)
                 total_excluded += excluded
                 print(f"  - {category}: {len(df):,}개 리뷰 (제외: {excluded:,}개)")
@@ -137,7 +137,7 @@ def load_review_data(partitioned_reviews_dir, finetune_ids_path=None):
             print(f"파일 로드 오류: {file_path} - {e}")
 
     print(f"\n✓ 총 로드: {total_loaded:,}개")
-    if finetune_ids:
+    if finetune_id_strings:
         print(f"✓ 파인튜닝 ID 제외: {total_excluded:,}개")
         print(f"✓ ML 학습용 데이터: {len(all_reviews):,}개")
     else:
