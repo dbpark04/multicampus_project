@@ -145,9 +145,10 @@ def load_reviews_data():
     print(f"전체 리뷰: {len(df_all):,}개")
 
     # 유효한 데이터 필터링 (라벨 있고, 텍스트 있는 경우)
+    # product_id와 id 컬럼 포함하여 로드
     df_filtered = df_all[
         df_all["label"].notna() & (df_all["full_text"].str.strip() != "")
-    ][["full_text", "label"]].copy()
+    ][["product_id", "id", "full_text", "label"]].copy()
 
     df_filtered["label"] = df_filtered["label"].astype(int)
     print(f"유효한 리뷰: {len(df_filtered):,}개")
@@ -189,6 +190,13 @@ def load_reviews_data():
             df_filtered = df_filtered.sample(n=MAX_SAMPLES, random_state=RANDOM_SEED)
 
     print(f"최종 학습 데이터: {len(df_filtered):,}개")
+
+    # 파인튜닝에 사용된 ID 저장 (ML 모델 학습 시 제외용)
+    used_ids_path = os.path.join(BASE_DIR, "finetune_used_ids.csv")
+    df_filtered[["product_id", "id"]].to_csv(used_ids_path, index=False)
+    print(f"\n✓ 파인튜닝 사용 ID 저장: {used_ids_path}")
+    print(f"  - 저장된 ID 개수: {len(df_filtered):,}개")
+
     return df_filtered
 
 
@@ -202,11 +210,13 @@ def prepare_datasets(df):
     print(f"  - 학습: {len(train_df):,}개")
     print(f"  - 검증: {len(eval_df):,}개")
 
-    # Dataset 객체 생성
+    # Dataset 객체 생성 (full_text와 label만 사용)
     train_ds = Dataset.from_pandas(
-        train_df[["full_text", "label"]], preserve_index=False
+        train_df[["full_text", "label"]].copy(), preserve_index=False
     )
-    eval_ds = Dataset.from_pandas(eval_df[["full_text", "label"]], preserve_index=False)
+    eval_ds = Dataset.from_pandas(
+        eval_df[["full_text", "label"]].copy(), preserve_index=False
+    )
 
     return train_ds, eval_ds
 

@@ -81,7 +81,7 @@ ML_MODELS_TO_USE = [
 ]
 
 
-def load_review_data(partitioned_reviews_dir):
+def load_review_data(partitioned_reviews_dir, finetune_ids_path=None):
     print("======================================================================")
     print(f"전처리된 리뷰 데이터 로드 중: {partitioned_reviews_dir}")
 
@@ -94,19 +94,54 @@ def load_review_data(partitioned_reviews_dir):
         print("[오류] Parquet 파일을 찾을 수 없습니다.")
         return []
 
+    # 파인튜닝에 사용된 ID 로드 (있는 경우)
+    finetune_ids = set()
+    if finetune_ids_path and os.path.exists(finetune_ids_path):
+        print(f"\n파인튜닝 사용 ID 로드 중: {finetune_ids_path}")
+        finetune_df = pd.read_csv(finetune_ids_path)
+        # (product_id, id) 튜플로 저장
+        finetune_ids = set(zip(finetune_df["product_id"], finetune_df["id"]))
+        print(f"✓ 제외할 ID: {len(finetune_ids):,}개")
+
     all_reviews = []
+    total_loaded = 0
+    total_excluded = 0
+
     for file_path in parquet_files:
         try:
             df = pd.read_parquet(file_path)
             category = os.path.basename(os.path.dirname(file_path)).replace(
                 "category=", ""
             )
-            print(f"  - {category}: {len(df):,}개 리뷰")
+            total_loaded += len(df)
+
+            # 파인튜닝 사용 ID 제외
+            if finetune_ids:
+                before_count = len(df)
+                # product_id와 id가 모두 있는 행만 필터링
+                df = df[
+                    ~df.apply(
+                        lambda row: (row.get("product_id"), row.get("id"))
+                        in finetune_ids,
+                        axis=1,
+                    )
+                ]
+                excluded = before_count - len(df)
+                total_excluded += excluded
+                print(f"  - {category}: {len(df):,}개 리뷰 (제외: {excluded:,}개)")
+            else:
+                print(f"  - {category}: {len(df):,}개 리뷰")
+
             all_reviews.extend(df.to_dict("records"))
         except Exception as e:
             print(f"파일 로드 오류: {file_path} - {e}")
 
-    print(f"✓ 총 {len(all_reviews):,}개 리뷰 로드 완료")
+    print(f"\n✓ 총 로드: {total_loaded:,}개")
+    if finetune_ids:
+        print(f"✓ 파인튜닝 ID 제외: {total_excluded:,}개")
+        print(f"✓ ML 학습용 데이터: {len(all_reviews):,}개")
+    else:
+        print(f"✓ 총 {len(all_reviews):,}개 리뷰 로드 완료")
     return all_reviews
 
 
@@ -491,15 +526,18 @@ def main():
         BASE_DIR = "/content"
         PROCESSED_DATA_DIR = os.path.join(BASE_DIR, "data/processed_data")
         MODEL_OUTPUT_DIR = os.path.join(BASE_DIR, "models")
+        FINETUNE_IDS_PATH = os.path.join(BASE_DIR, "finetune_used_ids.csv")
     else:
+        BASE_DIR = "./data"
         PROCESSED_DATA_DIR = "./data/processed_data"
         MODEL_OUTPUT_DIR = "./models"
+        FINETUNE_IDS_PATH = os.path.join(BASE_DIR, "finetune_used_ids.csv")
 
     PARTITIONED_REVIEWS_DIR = os.path.join(PROCESSED_DATA_DIR, "partitioned_reviews")
     os.makedirs(MODEL_OUTPUT_DIR, exist_ok=True)
 
-    # 1. 데이터 로드
-    reviews = load_review_data(PARTITIONED_REVIEWS_DIR)
+    # 1. 데이터 로드 (파인튜닝 사용 ID 제외)
+    reviews = load_review_data(PARTITIONED_REVIEWS_DIR, FINETUNE_IDS_PATH)
     if not reviews:
         print("[중단] 로드된 리뷰 데이터가 없습니다.")
         return
