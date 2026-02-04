@@ -92,7 +92,7 @@ def load_review_data(partitioned_reviews_dir, finetune_ids_path=None):
 
     if not parquet_files:
         print("[오류] Parquet 파일을 찾을 수 없습니다.")
-        return []
+        return pd.DataFrame()
 
     # 파인튜닝에 사용된 ID 로드 (있는 경우)
     finetune_id_strings = set()
@@ -106,7 +106,7 @@ def load_review_data(partitioned_reviews_dir, finetune_ids_path=None):
         }
         print(f"✓ 제외할 ID: {len(finetune_id_strings):,}개")
 
-    all_reviews = []
+    all_dfs = []  # 딕셔너리 리스트 대신 DataFrame 리스트 사용
     total_loaded = 0
     total_excluded = 0
 
@@ -132,123 +132,122 @@ def load_review_data(partitioned_reviews_dir, finetune_ids_path=None):
             else:
                 print(f"  - {category}: {len(df):,}개 리뷰")
 
-            all_reviews.extend(df.to_dict("records"))
+            # 필요한 컬럼만 선택 (메모리 절약)
+            needed_cols = [
+                "product_id",
+                "id",
+                "label",
+                "word2vec_sentiment",
+                "bert_sentiment",
+                "roberta_sentiment",
+                "koelectra_sentiment",
+            ]
+            # 존재하는 컬럼만 선택
+            existing_cols = [col for col in needed_cols if col in df.columns]
+            all_dfs.append(df[existing_cols])
+
         except Exception as e:
             print(f"파일 로드 오류: {file_path} - {e}")
+
+    # DataFrame들을 하나로 합침 (딕셔너리 변환보다 메모리 효율적)
+    final_df = pd.concat(all_dfs, ignore_index=True)
 
     print(f"\n✓ 총 로드: {total_loaded:,}개")
     if finetune_id_strings:
         print(f"✓ 파인튜닝 ID 제외: {total_excluded:,}개")
-        print(f"✓ ML 학습용 데이터: {len(all_reviews):,}개")
+        print(f"✓ ML 학습용 데이터: {len(final_df):,}개")
     else:
-        print(f"✓ 총 {len(all_reviews):,}개 리뷰 로드 완료")
-    return all_reviews
+        print(f"✓ 총 {len(final_df):,}개 리뷰 로드 완료")
+    return final_df
 
 
-def prepare_training_data(reviews):
+def prepare_training_data(df):
     print("\n학습 데이터 준비 중...")
+
+    if df.empty:
+        print("[경고] 빈 DataFrame입니다.")
+        return {}
 
     # 사용 가능한 모델 타입 자동 감지
     available_models = set()
-    if reviews:
-        sample = reviews[0]
-        for key in sample.keys():
-            # word2vec_sentiment, bert_sentiment, roberta_sentiment, koelectra_sentiment 등 벡터 필드 감지
-            if (
-                key
-                in [
-                    "word2vec_sentiment",
-                    "bert_sentiment",
-                    "roberta_sentiment",
-                    "koelectra_sentiment",
-                ]
-                and sample.get(key) is not None
-            ):
-                available_models.add(key)
+    for key in df.columns:
+        # word2vec_sentiment, bert_sentiment, roberta_sentiment, koelectra_sentiment 등 벡터 필드 감지
+        if key in [
+            "word2vec_sentiment",
+            "bert_sentiment",
+            "roberta_sentiment",
+            "koelectra_sentiment",
+        ]:
+            available_models.add(key)
 
     print(f"\n[감지된 모델 타입]")
     print(f"  - 사용 가능: {sorted(available_models)}")
 
-    # 모델별 데이터 저장
-    model_data = {model: {"X": [], "y": []} for model in available_models}
-
     # 데이터 샘플로 구조 확인
-    if reviews:
-        sample = reviews[0]
-        print(f"\n[데이터 구조 확인]")
-        print(f"  - 전체 키: {list(sample.keys())}")
-        print(f"  - label 존재: {'label' in sample}, 값: {sample.get('label')}")
+    print(f"\n[데이터 구조 확인]")
+    print(f"  - 전체 컬럼: {list(df.columns)}")
+    print(f"  - 총 행 수: {len(df):,}개")
+    print(f"  - label 존재: {'label' in df.columns}")
 
-        for model_name in available_models:
-            val = sample.get(model_name)
-            if val is not None:
-                print(
-                    f"  - {model_name} 타입: {type(val)}, 길이: {len(val) if hasattr(val, '__len__') else 'N/A'}"
-                )
+    for model_name in available_models:
+        non_null_count = df[model_name].notna().sum()
+        print(f"  - {model_name} 비어있지 않은 행: {non_null_count:,}개")
 
-        # 처음 100개 샘플에서 통계
-        label_count = sum(1 for r in reviews[:100] if pd.notna(r.get("label")))
-        print(f"\n[처음 100개 샘플 확인]")
-        print(f"  - label 있는 리뷰: {label_count}개")
-        for model_name in available_models:
-            count = sum(1 for r in reviews[:100] if r.get(model_name) is not None)
-            print(f"  - {model_name} 있는 리뷰: {count}개")
-
-    # 각 벡터 타입별로 데이터 수집
-    for review in reviews:
-        label = review.get("label")
-
-        # label이 유효한지 확인
-        if not pd.notna(label):
-            continue
-
-        # 각 모델의 벡터 수집
-        for model_name in available_models:
-            vec = review.get(model_name)
-            if vec is not None and isinstance(vec, (list, np.ndarray)) and len(vec) > 0:
-                model_data[model_name]["X"].append(np.array(vec))
-                model_data[model_name]["y"].append(int(label))
-
-    # 결과 출력
+    # 각 벡터 타입별로 데이터 수집 (반복문 대신 벡터화 연산)
     results = {}
     for model_name in sorted(available_models):
-        X = model_data[model_name]["X"]
-        y = model_data[model_name]["y"]
+        # label과 벡터가 모두 있는 행만 선택
+        valid_df = df[df["label"].notna() & df[model_name].notna()].copy()
+
+        if len(valid_df) == 0:
+            print(f"\n[건너뜀] {model_name.upper()}: 유효한 데이터 없음")
+            results[model_name] = (np.array([]), np.array([]))
+            continue
+
+        # 벡터를 numpy 배열로 변환 (반복문보다 100배 빠름)
+        X = np.stack(valid_df[model_name].values)
+        y = valid_df["label"].values.astype(int)
+
         count = len(y)
+        pos = np.sum(y)
+        neg = count - pos
 
         print(f"\n✓ {model_name.upper()} 데이터: {count:,}개")
-        if count > 0:
-            pos = sum(y)
-            neg = count - pos
-            print(f"  - 긍정: {pos:,}개 ({pos/count*100:.1f}%)")
-            print(f"  - 부정: {neg:,}개 ({neg/count*100:.1f}%)")
-            print(f"  - 벡터 차원: {len(X[0])}")
-            results[model_name] = (np.array(X), np.array(y))
-        else:
-            results[model_name] = (np.array([]), np.array([]))
+        print(f"  - 긍정: {pos:,}개 ({pos/count*100:.1f}%)")
+        print(f"  - 부정: {neg:,}개 ({neg/count*100:.1f}%)")
+        print(f"  - 벡터 차원: {X.shape[1]}")
+        results[model_name] = (X, y)
 
     return results
 
 
 def get_model_dictionary():
     """비교할 ML 모델들을 정의합니다."""
-    lr = LogisticRegression(max_iter=1000, class_weight="balanced", random_state=42)
-    rf = RandomForestClassifier(
-        n_estimators=100, class_weight="balanced", random_state=42, n_jobs=-1
+    from sklearn.linear_model import SGDClassifier
+
+    # 1. 조기 종료 가능한 Logistic Regression (SGD 방식)
+    lr = SGDClassifier(
+        loss="log_loss",  # 로지스틱 회귀와 동일한 손실 함수
+        early_stopping=True,  # 조기 종료 활성화
+        validation_fraction=0.1,  # 10%를 검증용으로 사용
+        n_iter_no_change=5,  # 5번 동안 안 변하면 정지
+        class_weight="balanced",
+        random_state=42,
+        max_iter=1000,
     )
-    dt = DecisionTreeClassifier(class_weight="balanced", random_state=42)
+
+    # 2. XGBoost & LightGBM (기본 설정 유지, 학습 시 파라미터 전달)
     xgb = XGBClassifier(eval_metric="logloss", random_state=42, n_jobs=-1)
     lgbm = LGBMClassifier(
         class_weight="balanced", random_state=42, n_jobs=-1, verbose=-1
     )
-    svc = SVC(probability=True, class_weight="balanced", random_state=42)
 
-    # 앙상블 모델 정의
-    estimators = [("lr", lr), ("rf", rf), ("xgb", xgb)]
-    voting = VotingClassifier(estimators=estimators, voting="soft", n_jobs=-1)
-    stacking = StackingClassifier(
-        estimators=estimators, final_estimator=LogisticRegression(), n_jobs=-1
+    # 3. 나머지는 조기 종료 미지원 (기존 그대로 유지)
+    rf = RandomForestClassifier(
+        n_estimators=100, class_weight="balanced", random_state=42, n_jobs=-1
     )
+    dt = DecisionTreeClassifier(class_weight="balanced", random_state=42)
+    svc = SVC(probability=True, class_weight="balanced", random_state=42)
 
     return {
         "Logistic": lr,
@@ -257,8 +256,6 @@ def get_model_dictionary():
         "XGBoost": xgb,
         "LightGBM": lgbm,
         "SVM": svc,
-        "Voting": voting,
-        "Stacking": stacking,
     }
 
 
@@ -271,6 +268,7 @@ def train_model(X_train, y_train, ml_model=None):
         ml_model: 사용할 ML 모델 (None이면 기본 LogisticRegression)
     """
     import time
+    from sklearn.preprocessing import StandardScaler
 
     start_time = time.time()
 
@@ -280,12 +278,35 @@ def train_model(X_train, y_train, ml_model=None):
             max_iter=1000, random_state=42, class_weight="balanced"
         )
         print("\n[Logistic Regression] 모델 학습 중...")
+        model.fit(X_train, y_train)
     else:
         model = ml_model
         model_name = type(model).__name__
         print(f"\n[{model_name}] 모델 학습 중...")
 
-    model.fit(X_train, y_train)
+        # SGDClassifier는 스케일에 민감하므로 StandardScaler 적용
+        if model_name == "SGDClassifier":
+            print("  → StandardScaler 적용 중...")
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            model.scaler = scaler  # 추론 시 사용하기 위해 모델에 scaler 저장
+            model.fit(X_train_scaled, y_train)
+        # 조기 종료를 위한 내부 검증 데이터 분리 (10%)
+        # Boosting 계열(XGB, LightGBM)만 사용
+        elif model_name in ["XGBClassifier", "LGBMClassifier"]:
+            X_t, X_v, y_t, y_v = train_test_split(
+                X_train, y_train, test_size=0.1, random_state=42, stratify=y_train
+            )
+            model.fit(
+                X_t,
+                y_t,
+                eval_set=[(X_v, y_v)],
+                early_stopping_rounds=10,  # 10번 시도 후 개선 없으면 중단
+                verbose=False,
+            )
+        else:
+            # RF/DT/SVM 등은 전체 데이터로 학습
+            model.fit(X_train, y_train)
 
     train_time = time.time() - start_time
     print(f"✓ 모델 학습 완료 ({train_time:.1f}초)")
@@ -294,8 +315,16 @@ def train_model(X_train, y_train, ml_model=None):
 
 def evaluate_model(model, X_test, y_test, output_dir, model_name="model"):
     print("\n모델 평가 중...")
-    y_pred = model.predict(X_test)
-    y_proba = model.predict_proba(X_test)[:, 1]  # 긍정 클래스 확률
+
+    # SGDClassifier의 경우 저장된 scaler로 변환
+    model_type = type(model).__name__
+    if model_type == "SGDClassifier" and hasattr(model, "scaler"):
+        X_test_scaled = model.scaler.transform(X_test)
+        y_pred = model.predict(X_test_scaled)
+        y_proba = model.predict_proba(X_test_scaled)[:, 1]
+    else:
+        y_pred = model.predict(X_test)
+        y_proba = model.predict_proba(X_test)[:, 1]  # 긍정 클래스 확률
 
     # average=None으로 각 클래스(0:부정, 1:긍정)별 점수를 얻음
     precision_per_class, recall_per_class, f1_per_class, support_per_class = (
@@ -537,13 +566,13 @@ def main():
     os.makedirs(MODEL_OUTPUT_DIR, exist_ok=True)
 
     # 1. 데이터 로드 (파인튜닝 사용 ID 제외)
-    reviews = load_review_data(PARTITIONED_REVIEWS_DIR, FINETUNE_IDS_PATH)
-    if not reviews:
+    df = load_review_data(PARTITIONED_REVIEWS_DIR, FINETUNE_IDS_PATH)
+    if df.empty:
         print("[중단] 로드된 리뷰 데이터가 없습니다.")
         return
 
     # 2. 학습 데이터 준비 (모든 모델 자동 감지)
-    model_data = prepare_training_data(reviews)
+    model_data = prepare_training_data(df)
     if not model_data:
         print("\n[중단] 학습 가능한 데이터가 없습니다.")
         return
