@@ -99,10 +99,14 @@ def load_review_data(partitioned_reviews_dir, finetune_ids_path=None):
     if finetune_ids_path and os.path.exists(finetune_ids_path):
         print(f"\n파인튜닝 사용 ID 로드 중: {finetune_ids_path}")
         finetune_df = pd.read_csv(finetune_ids_path)
-        # 벡터화를 위해 "product_id\x00id" 형식의 문자열 세트로 저장
+        # 벡터화를 위해 "search_name\x00product_id\x00id" 형식의 문자열 세트로 저장
         finetune_id_strings = {
-            f"{pid}\x00{rid}"
-            for pid, rid in zip(finetune_df["product_id"], finetune_df["id"])
+            f"{sn}\x00{pid}\x00{rid}"
+            for sn, pid, rid in zip(
+                finetune_df["search_name"],
+                finetune_df["product_id"],
+                finetune_df["id"],
+            )
         }
         print(f"✓ 제외할 ID: {len(finetune_id_strings):,}개")
 
@@ -121,9 +125,13 @@ def load_review_data(partitioned_reviews_dir, finetune_ids_path=None):
             # 파인튜닝 사용 ID 제외 (벡터화 방식으로 최적화)
             if finetune_id_strings:
                 before_count = len(df)
-                # product_id와 id를 결합한 문자열 생성 후 isin으로 빠르게 필터링
+                # search_name, product_id, id를 결합한 문자열 생성 후 isin으로 빠르게 필터링
                 current_ids = (
-                    df["product_id"].astype(str) + "\x00" + df["id"].astype(str)
+                    df["search_name"].astype(str)
+                    + "\x00"
+                    + df["product_id"].astype(str)
+                    + "\x00"
+                    + df["id"].astype(str)
                 )
                 df = df[~current_ids.isin(finetune_id_strings)]
                 excluded = before_count - len(df)
