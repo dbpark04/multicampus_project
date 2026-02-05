@@ -64,7 +64,11 @@ plt.rcParams["axes.unicode_minus"] = False  # 마이너스 깨짐 방지
 # ========== 학습할 조합 선택 ==========
 # 1) 벡터 타입 선택 (None이면 전부 사용)
 #    사용 가능: "word2vec_sentiment", "bert_sentiment", "roberta_sentiment", "koelectra_sentiment"
-VECTOR_TYPES_TO_USE = ["roberta_sentiment"]  # roberta_sentiment만 사용
+VECTOR_TYPES_TO_USE = [
+    # "bert_sentiment",
+    "roberta_sentiment",
+    # "koelectra_sentiment",
+]  # roberta_sentiment만 사용
 # VECTOR_TYPES_TO_USE = None  # 전부 사용하려면 None
 
 # 2) ML 모델 선택
@@ -73,8 +77,8 @@ ML_MODELS_TO_USE = [
     # "Logistic",
     # "RandomForest",
     # "DecisionTree",
-    # "XGBoost",
-    "LightGBM",
+    "XGBoost",
+    # "LightGBM",
     # "SVM",
     # "Voting",
     # "Stacking",
@@ -99,6 +103,15 @@ def load_review_data(partitioned_reviews_dir, finetune_ids_path=None):
     if finetune_ids_path and os.path.exists(finetune_ids_path):
         print(f"\n파인튜닝 사용 ID 로드 중: {finetune_ids_path}")
         finetune_df = pd.read_csv(finetune_ids_path)
+        print(f"  - CSV 컬럼: {list(finetune_df.columns)}")
+        print(f"  - CSV 행 수: {len(finetune_df):,}개")
+        if len(finetune_df) > 0:
+            print(
+                f"  - 샘플 CSV product_id: '{finetune_df['product_id'].iloc[0]}' (타입: {type(finetune_df['product_id'].iloc[0])})"
+            )
+            print(
+                f"  - 샘플 CSV id: '{finetune_df['id'].iloc[0]}' (타입: {type(finetune_df['id'].iloc[0])})"
+            )
         # 벡터화를 위해 "product_id\x00id" 형식의 문자열 세트로 저장
         finetune_id_strings = {
             f"{pid}\x00{rid}"
@@ -108,6 +121,11 @@ def load_review_data(partitioned_reviews_dir, finetune_ids_path=None):
             )
         }
         print(f"✓ 제외할 ID: {len(finetune_id_strings):,}개")
+        if len(finetune_id_strings) > 0:
+            sample_id = list(finetune_id_strings)[0]
+            print(f"  - 샘플 결합 ID: {repr(sample_id)}")  # repr()로 변경
+    else:
+        print(f"\n⚠️  파인튜닝 ID 파일 없음: {finetune_ids_path}")
 
     all_dfs = []  # 딕셔너리 리스트 대신 DataFrame 리스트 사용
     total_loaded = 0
@@ -124,10 +142,39 @@ def load_review_data(partitioned_reviews_dir, finetune_ids_path=None):
             # 파인튜닝 사용 ID 제외 (벡터화 방식으로 최적화)
             if finetune_id_strings:
                 before_count = len(df)
-                # product_id, id를 결합한 문자열 생성 후 isin으로 빠르게 필터링
-                current_ids = (
-                    df["product_id"].astype(str) + "\x00" + df["id"].astype(str)
+                # product_id, id를 결합한 문자열 생성 (apply로 명시적 결합)
+                current_ids = df.apply(
+                    lambda row: f"{row['product_id']}\x00{row['id']}", axis=1
                 )
+
+                # 첫 번째 파일에서만 디버깅 정보 출력
+                if total_loaded == before_count and len(df) > 0:
+                    print(f"\n  [디버깅 - {category}]")
+                    print(
+                        f"    데이터 product_id: '{df['product_id'].iloc[0]}' (타입: {type(df['product_id'].iloc[0])})"
+                    )
+                    print(
+                        f"    데이터 id: '{df['id'].iloc[0]}' (타입: {type(df['id'].iloc[0])})"
+                    )
+                    print(f"    결합 ID: {repr(current_ids.iloc[0])}")
+                    print(
+                        f"    매칭 여부: {current_ids.iloc[0] in finetune_id_strings}"
+                    )
+                    # 바이트 레벨 확인으로 null byte 존재 여부 검증
+                    data_id_bytes = (
+                        current_ids.iloc[0].encode("unicode_escape").decode("ascii")
+                    )
+                    csv_sample = list(finetune_id_strings)[0]
+                    csv_id_bytes = csv_sample.encode("unicode_escape").decode("ascii")
+                    print(f"    데이터 ID (바이트): {data_id_bytes}")
+                    print(f"    CSV ID (바이트):    {csv_id_bytes}")
+                    print(
+                        f"    결합 ID 길이: {len(current_ids.iloc[0])} (예상: {len(df['product_id'].iloc[0]) + 1 + len(str(df['id'].iloc[0]))})"
+                    )
+                    # CSV 샘플 (이중 repr 제거)
+                    print(f"    CSV 샘플 5개: {list(finetune_id_strings)[:5]}")
+                    print()
+
                 df = df[~current_ids.isin(finetune_id_strings)]
                 excluded = before_count - len(df)
                 total_excluded += excluded
@@ -556,12 +603,14 @@ def main():
     # 경로 설정 (Colab 환경 고려)
     if is_colab():
         BASE_DIR = "/content"
-        PROCESSED_DATA_DIR = os.path.join(BASE_DIR, "data/processed_data")
+        PROCESSED_DATA_DIR = os.path.join(
+            BASE_DIR, "data/new_processed_data"
+        )  # new_processed_data 사용
         MODEL_OUTPUT_DIR = os.path.join(BASE_DIR, "models")
-        FINETUNE_IDS_PATH = os.path.join(BASE_DIR, "finetune_used_ids.csv")
+        FINETUNE_IDS_PATH = os.path.join(BASE_DIR, "data/finetune_used_ids.csv")
     else:
         BASE_DIR = "./data"
-        PROCESSED_DATA_DIR = "./data/processed_data"
+        PROCESSED_DATA_DIR = "./data/new_processed_data"  # new_processed_data 사용
         MODEL_OUTPUT_DIR = "./models"
         FINETUNE_IDS_PATH = os.path.join(BASE_DIR, "finetune_used_ids.csv")
 
